@@ -18,21 +18,64 @@ interface EvaluatePayload {
 }
 
 const UNIT_FACTORS: Record<string, { base: string; factor: number }> = {
+  // Current
   a: { base: "A", factor: 1 },
   ma: { base: "A", factor: 1e-3 },
   ua: { base: "A", factor: 1e-6 },
   "µa": { base: "A", factor: 1e-6 },
   ka: { base: "A", factor: 1e3 },
+  // Voltage
   v: { base: "V", factor: 1 },
   mv: { base: "V", factor: 1e-3 },
   kv: { base: "V", factor: 1e3 },
+  // Power
+  w: { base: "W", factor: 1 },
+  mw: { base: "W", factor: 1e-3 },
+  kw: { base: "W", factor: 1e3 },
+  // Energy
+  j: { base: "J", factor: 1 },
+  kj: { base: "J", factor: 1e3 },
+  mj: { base: "J", factor: 1e6 },
+  // Mass
   g: { base: "kg", factor: 1e-3 },
   kg: { base: "kg", factor: 1 },
   mg: { base: "kg", factor: 1e-6 },
+  // Volume
+  l: { base: "L", factor: 1 },
+  ml: { base: "L", factor: 1e-3 },
+  cm3: { base: "L", factor: 1e-3 },
+  "cm^3": { base: "L", factor: 1e-3 },
+  // Density
+  "g/ml": { base: "g/mL", factor: 1 },
+  "g/cm3": { base: "g/mL", factor: 1 },
+  "g/cm^3": { base: "g/mL", factor: 1 },
+  "kg/l": { base: "g/mL", factor: 1 },
+  "kg/m3": { base: "g/mL", factor: 1e-3 },
+  "kg/m^3": { base: "g/mL", factor: 1e-3 },
+  // Mass concentration
+  "g/l": { base: "g/L", factor: 1 },
+  "g.l-1": { base: "g/L", factor: 1 },
+  "g·l⁻¹": { base: "g/L", factor: 1 },
+  "mg/l": { base: "g/L", factor: 1e-3 },
+  // Amount of substance
+  mol: { base: "mol", factor: 1 },
+  mmol: { base: "mol", factor: 1e-3 },
+  // Molar concentration
+  "mol/l": { base: "mol/L", factor: 1 },
+  "mol.l-1": { base: "mol/L", factor: 1 },
+  "mol·l⁻¹": { base: "mol/L", factor: 1 },
+  "mmol/l": { base: "mol/L", factor: 1e-3 },
+  // Speed
   "m/s": { base: "m/s", factor: 1 },
   "m.s-1": { base: "m/s", factor: 1 },
   "m·s⁻¹": { base: "m/s", factor: 1 },
   "km/h": { base: "m/s", factor: 1 / 3.6 },
+  // Time
+  s: { base: "s", factor: 1 },
+  ms: { base: "s", factor: 1e-3 },
+  us: { base: "s", factor: 1e-6 },
+  "µs": { base: "s", factor: 1e-6 },
+  min: { base: "s", factor: 60 },
 };
 
 function normalize(raw: string): string {

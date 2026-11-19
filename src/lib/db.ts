@@ -14,6 +14,51 @@ export interface MembershipRecord {
   };
 }
 
+export interface MasteryRow {
+  conceptCode: string;
+  conceptLabel: string;
+  domain: string;
+  attempts: number;
+  correctAttempts: number;
+  masteryScore: number;
+  status: "not_started" | "developing" | "acquired" | "needs_review";
+  lastPracticedAt: string | null;
+  nextReviewAt: string | null;
+}
+
+export interface SubmissionHistoryRow {
+  id: string;
+  exerciseTitle: string;
+  score: number;
+  maxScore: number;
+  status: string;
+  createdAt: string;
+  errorSummary?: string;
+}
+
+export interface EnrolledClassRow {
+  id: string;
+  name: string;
+  level: string;
+  inviteCode: string;
+}
+
+export interface ClassAssignmentRow {
+  id: string;
+  title: string;
+  className: string;
+  mode: string;
+  dueAt: string | null;
+}
+
+export interface StudentDashboardPayload {
+  enrolledClasses: EnrolledClassRow[];
+  assignments: ClassAssignmentRow[];
+  mastery: MasteryRow[];
+  recentSubmissions: SubmissionHistoryRow[];
+  fromDatabase: boolean;
+}
+
 export async function fetchRelationalProfile(userId: string): Promise<{
   profile: UserProfile | null;
   memberships: MembershipRecord[];
@@ -74,13 +119,6 @@ export async function fetchRelationalProfile(userId: string): Promise<{
   return { profile, memberships };
 }
 
-/**
- * Runs relational onboarding after signup in Supabase PostgreSQL:
- * - Student with classCode -> RPC join_class_by_code() -> inserts into class_members
- * - Parent -> inserts row in parent_child_links (auto-links when child signs up!)
- * - Org Admin -> RPC create_organization_with_admin() -> creates organization + membership + subscription
- * - Teacher -> joins organization by schoolCode or creates personal/school org row
- */
 export async function completeRelationalOnboarding(
   userId: string,
   profile: UserProfile
@@ -89,19 +127,17 @@ export async function completeRelationalOnboarding(
   const warnings: string[] = [];
   if (!isSupabaseConfigured || !supabase) return { warnings };
 
-  // 1. Student joining a class via invite code
   if (profile.role === "student" && profile.classCode?.trim()) {
     const { data, error } = await supabase.rpc("join_class_by_code", {
       p_invite_code: profile.classCode.trim(),
     });
     if (error || (data && !data.ok)) {
       warnings.push(
-        `Code classe « ${profile.classCode} » non trouvé : vous pourrez rejoindre une classe plus tard.`
+        `Code classe « ${profile.classCode} » non trouvé : tu pourras rejoindre ta classe depuis ton tableau de bord.`
       );
     }
   }
 
-  // 2. Parent creating a relational parent_child_links row
   if (profile.role === "parent" && profile.childName?.trim()) {
     const { error } = await supabase.from("parent_child_links").insert({
       parent_id: userId,
@@ -111,31 +147,23 @@ export async function completeRelationalOnboarding(
       status: "pending",
       parental_consent_given: true,
     });
-    if (error) {
-      warnings.push("Lien parent-enfant en attente de synchronisation.");
-    }
+    if (error) warnings.push("Lien parent-enfant en attente de synchronisation.");
   }
 
-  // 3. Organization Admin creating an organization + admin membership + trial subscription
   if (profile.role === "org_admin" && profile.school?.trim()) {
     const { error } = await supabase.rpc("create_organization_with_admin", {
       p_name: profile.school.trim(),
       p_seats: profile.orgSeats || 60,
     });
-    if (error) {
-      warnings.push("Création de l'établissement différée.");
-    }
+    if (error) warnings.push("Création de l'établissement différée.");
   }
 
-  // 4. Teacher joining an existing school or creating their default class
-  if (profile.role === "teacher" && profile.school?.trim()) {
-    const { data: existingOrg } = profile.schoolCode?.trim()
-      ? await supabase
-          .from("organizations")
-          .select("id")
-          .eq("invite_code", profile.schoolCode.trim().toUpperCase())
-          .maybeSingle()
-      : { data: null };
+  if (profile.role === "teacher" && profile.schoolCode?.trim()) {
+    const { data: existingOrg } = await supabase
+      .from("organizations")
+      .select("id")
+      .eq("invite_code", profile.schoolCode.trim().toUpperCase())
+      .maybeSingle();
 
     if (existingOrg?.id) {
       await supabase.from("memberships").insert({
@@ -151,38 +179,312 @@ export async function completeRelationalOnboarding(
 }
 
 /**
- * Persists a student's evaluated exercise attempt into submissions + evaluation_results
+ * Student joins a class anytime using a teacher's invite code (RPC join_class_by_code)
+ */
+export async function joinClassWithCode(code: string): Promise<{
+  ok: boolean;
+  className?: string;
+  level?: string;
+  error?: string;
+}> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: true, className: `Classe ${code.toUpperCase()}`, level: "Terminale" };
+  }
+
+  const { data, error } = await supabase.rpc("join_class_by_code", {
+    p_invite_code: code.trim(),
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Code classe introuvable." };
+  return { ok: true, className: data?.class_name, level: data?.level };
+}
+
+/**
+ * Fetches real Student Dashboard data (classes, assignments, concept_mastery, submissions) from Supabase
+ */
+export async function fetchStudentDashboardData(studentId: string): Promise<StudentDashboardPayload> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase || !studentId || studentId.startsWith("local-") || studentId.startsWith("demo-")) {
+    return { enrolledClasses: [], assignments: [], mastery: [], recentSubmissions: [], fromDatabase: false };
+  }
+
+  const [{ data: memberRows }, { data: masteryRows }, { data: subRows }] = await Promise.all([
+    supabase
+      .from("class_members")
+      .select("class_id, classes(id, name, level, invite_code)")
+      .eq("student_id", studentId),
+    supabase
+      .from("concept_mastery")
+      .select("attempts, correct_attempts, mastery_score, status, last_practiced_at, next_review_at, concepts(code, label, domain)")
+      .eq("student_id", studentId),
+    supabase
+      .from("submissions")
+      .select("id, rendered_params, created_at, evaluation_results(score, max_score, status, feedback_summary)")
+      .eq("student_id", studentId)
+      .order("created_at", { ascending: false })
+      .limit(10),
+  ]);
+
+  const enrolledClasses: EnrolledClassRow[] = (memberRows || [])
+    .map((r: Record<string, unknown>) => {
+      const c = (Array.isArray(r.classes) ? r.classes[0] : r.classes) as Record<string, string> | null;
+      if (!c) return null;
+      return { id: c.id, name: c.name, level: c.level, inviteCode: c.invite_code };
+    })
+    .filter(Boolean) as EnrolledClassRow[];
+
+  let assignments: ClassAssignmentRow[] = [];
+  if (enrolledClasses.length > 0) {
+    const classIds = enrolledClasses.map((c) => c.id);
+    const { data: asgRows } = await supabase
+      .from("assignments")
+      .select("id, title, class_id, mode, due_at")
+      .in("class_id", classIds)
+      .order("created_at", { ascending: false });
+
+    assignments = (asgRows || []).map((a: Record<string, unknown>) => ({
+      id: String(a.id),
+      title: String(a.title),
+      className: enrolledClasses.find((c) => c.id === a.class_id)?.name || "Classe",
+      mode: a.mode === "graded" ? "Noté" : "Entraînement",
+      dueAt: a.due_at ? String(a.due_at) : null,
+    }));
+  }
+
+  const mastery: MasteryRow[] = (masteryRows || []).map((m: Record<string, unknown>) => {
+    const c = (Array.isArray(m.concepts) ? m.concepts[0] : m.concepts) as Record<string, string> | null;
+    return {
+      conceptCode: c?.code || "concept",
+      conceptLabel: c?.label || "Compétence",
+      domain: c?.domain || "Physique-Chimie",
+      attempts: Number(m.attempts || 0),
+      correctAttempts: Number(m.correct_attempts || 0),
+      masteryScore: Number(m.mastery_score || 0),
+      status: (m.status as MasteryRow["status"]) || "developing",
+      lastPracticedAt: m.last_practiced_at ? String(m.last_practiced_at) : null,
+      nextReviewAt: m.next_review_at ? String(m.next_review_at) : null,
+    };
+  });
+
+  const recentSubmissions: SubmissionHistoryRow[] = (subRows || []).map((s: Record<string, unknown>) => {
+    const ev = (Array.isArray(s.evaluation_results)
+      ? s.evaluation_results[0]
+      : s.evaluation_results) as Record<string, unknown> | null;
+    const params = (s.rendered_params as Record<string, unknown>) || {};
+    return {
+      id: String(s.id),
+      exerciseTitle: String(params.exerciseTitle || "Exercice Physique-Chimie"),
+      score: Number(ev?.score ?? 0),
+      maxScore: Number(ev?.max_score ?? 2),
+      status: String(ev?.status ?? "incorrect"),
+      createdAt: String(s.created_at),
+      errorSummary: ev?.feedback_summary ? String(ev.feedback_summary) : undefined,
+    };
+  });
+
+  return { enrolledClasses, assignments, mastery, recentSubmissions, fromDatabase: true };
+}
+
+/**
+ * Adaptive Learning Engine + Submission Persistence (§10):
+ * Saves submission, evaluation_results, error_records, AND updates concept_mastery with spaced review!
  */
 export async function recordExerciseSubmission(params: {
   studentId: string;
+  exerciseId?: string;
+  exerciseTitle?: string;
+  conceptCodes?: string[];
   renderedParams: Record<string, unknown>;
   rawAnswers: Record<string, string>;
   score: number;
   maxScore: number;
   status: "correct" | "partially_correct" | "incorrect" | "unreadable";
   engine: string;
+  errors?: { code: string; category: string; evidence: string }[];
 }) {
   const supabase = getSupabaseBrowserClient();
-  if (!isSupabaseConfigured || !supabase) return;
+  if (!isSupabaseConfigured || !supabase || params.studentId.startsWith("local-") || params.studentId.startsWith("demo-")) {
+    return;
+  }
 
   const { data: sub } = await supabase
     .from("submissions")
     .insert({
       student_id: params.studentId,
       input_mode: "typed",
-      rendered_params: params.renderedParams,
+      rendered_params: {
+        ...params.renderedParams,
+        exerciseId: params.exerciseId,
+        exerciseTitle: params.exerciseTitle,
+      },
       raw_answers: params.rawAnswers,
     })
     .select("id")
     .single();
 
-  if (sub?.id) {
-    await supabase.from("evaluation_results").insert({
+  if (!sub?.id) return;
+
+  const errorSummary =
+    params.errors && params.errors.length > 0
+      ? params.errors.map((e) => e.code).join(", ")
+      : null;
+
+  const { data: evalRow } = await supabase
+    .from("evaluation_results")
+    .insert({
       submission_id: sub.id,
       status: params.status,
       score: params.score,
       max_score: params.maxScore,
       engine: params.engine,
-    });
+      feedback_summary: errorSummary,
+    })
+    .select("id")
+    .single();
+
+  // Save structured error_records + update concept_mastery per concept
+  const codes = params.conceptCodes || [];
+  if (codes.length === 0) return;
+
+  const { data: concepts } = await supabase
+    .from("concepts")
+    .select("id, code")
+    .in("code", codes);
+
+  if (!concepts || concepts.length === 0) return;
+
+  if (evalRow?.id && params.errors?.length) {
+    await supabase.from("error_records").insert(
+      params.errors.map((err) => ({
+        evaluation_result_id: evalRow.id,
+        concept_id: concepts[0].id,
+        error_code: err.code,
+        error_category: err.category,
+        evidence: err.evidence,
+        confidence: "computed",
+      }))
+    );
   }
+
+  const ratio = params.maxScore > 0 ? params.score / params.maxScore : 0;
+  const isSuccess = ratio >= 0.85;
+  const now = new Date();
+
+  for (const concept of concepts) {
+    const { data: existing } = await supabase
+      .from("concept_mastery")
+      .select("attempts, correct_attempts, mastery_score")
+      .eq("student_id", params.studentId)
+      .eq("concept_id", concept.id)
+      .maybeSingle();
+
+    const prevAttempts = Number(existing?.attempts || 0);
+    const prevCorrect = Number(existing?.correct_attempts || 0);
+    const prevScore = Number(existing?.mastery_score || 0);
+
+    const newAttempts = prevAttempts + 1;
+    const newCorrect = prevCorrect + (isSuccess ? 1 : 0);
+    // Weighted blend: 60% recent attempt + 40% history (Vision Doc §10.1)
+    const attemptPct = Math.round(ratio * 100);
+    const newScore =
+      prevAttempts === 0
+        ? attemptPct
+        : Math.min(100, Math.max(0, Math.round(prevScore * 0.55 + attemptPct * 0.45)));
+
+    // Mastery requires multiple successful attempts (Principle §5.3)
+    const newStatus: MasteryRow["status"] =
+      newScore >= 80 && newCorrect >= 2
+        ? "acquired"
+        : newScore < 50
+        ? "needs_review"
+        : "developing";
+
+    // Spaced review interval (days)
+    const reviewDays = newStatus === "acquired" ? 7 : newStatus === "developing" ? 3 : 1;
+    const nextReview = new Date(now.getTime() + reviewDays * 86400 * 1000).toISOString();
+
+    await supabase.from("concept_mastery").upsert(
+      {
+        student_id: params.studentId,
+        concept_id: concept.id,
+        attempts: newAttempts,
+        correct_attempts: newCorrect,
+        mastery_score: newScore,
+        status: newStatus,
+        last_practiced_at: now.toISOString(),
+        next_review_at: nextReview,
+      },
+      { onConflict: "student_id,concept_id" }
+    );
+  }
+}
+
+/**
+ * Fetches linked child progress for Parent Dashboard via parent_child_links
+ */
+export async function fetchParentChildDashboard(parentId: string): Promise<{
+  linked: boolean;
+  childName?: string;
+  childLevel?: string;
+  childEmail?: string;
+  mastery: MasteryRow[];
+  recentSubmissions: SubmissionHistoryRow[];
+}> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase || !parentId || parentId.startsWith("local-") || parentId.startsWith("demo-")) {
+    return { linked: false, mastery: [], recentSubmissions: [] };
+  }
+
+  const { data: link } = await supabase
+    .from("parent_child_links")
+    .select("student_id, invited_child_name, invited_child_email, invited_child_level, status")
+    .eq("parent_id", parentId)
+    .limit(1)
+    .maybeSingle();
+
+  if (!link) return { linked: false, mastery: [], recentSubmissions: [] };
+  if (!link.student_id) {
+    return {
+      linked: false,
+      childName: link.invited_child_name,
+      childLevel: link.invited_child_level || undefined,
+      childEmail: link.invited_child_email || undefined,
+      mastery: [],
+      recentSubmissions: [],
+    };
+  }
+
+  const childData = await fetchStudentDashboardData(link.student_id);
+  return {
+    linked: true,
+    childName: link.invited_child_name,
+    childLevel: link.invited_child_level || undefined,
+    childEmail: link.invited_child_email || undefined,
+    mastery: childData.mastery,
+    recentSubmissions: childData.recentSubmissions,
+  };
+}
+
+/**
+ * Uploads handwritten student photo into Supabase Private Storage bucket `student-photos`
+ */
+export async function uploadStudentPhoto(
+  studentId: string,
+  file: File
+): Promise<{ path?: string; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase || !studentId || studentId.startsWith("local-")) {
+    return { path: `local/${file.name}` };
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const path = `${studentId}/${Date.now()}_${safeName}`;
+  const { error } = await supabase.storage.from("student-photos").upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+  });
+
+  if (error) return { error: error.message };
+  return { path };
 }

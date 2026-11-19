@@ -146,16 +146,41 @@ export default function TeacherClassesPage() {
 
               {/* Roster preview */}
               <div className="p-6 flex-1">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-3 gap-2">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                     Élèves inscrits ({cls.students.length})
                   </h3>
-                  <button
-                    onClick={() => setInviteModalClassId(cls.id)}
-                    className="text-xs font-semibold text-indigo-600 hover:underline"
-                  >
-                    + Ajouter un élève
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <label className="cursor-pointer text-xs font-semibold text-emerald-600 hover:underline">
+                      📄 Importer CSV
+                      <input
+                        type="file"
+                        accept=".csv,.txt"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const text = await file.text();
+                          const rows = text
+                            .split(/\r?\n/)
+                            .map((r) => r.trim())
+                            .filter(Boolean);
+                          rows.forEach((row, idx) => {
+                            if (idx === 0 && row.toLowerCase().includes("nom")) return;
+                            const [n, em] = row.split(/[,;]/).map((s) => s.trim());
+                            if (n) addStudentToClass(cls.id, n, em || "");
+                          });
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+                    <button
+                      onClick={() => setInviteModalClassId(cls.id)}
+                      className="text-xs font-semibold text-indigo-600 hover:underline"
+                    >
+                      + Ajouter
+                    </button>
+                  </div>
                 </div>
 
                 {cls.students.length === 0 ? (

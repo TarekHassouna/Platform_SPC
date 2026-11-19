@@ -3,24 +3,23 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { MathText } from "@/components/MathText";
 
 type TutorMode = "guide" | "explain" | "quiz";
 
 interface Message {
   id: string;
-  role: "ai" | "user";
-  text: string;
-  formula?: string;
-  hintStep?: string;
+  role: "assistant" | "user";
+  content: string;
   suggestedFollowUp?: string[];
 }
 
 const CHAPTERS = [
-  { id: "ohm", domain: "Électricité", title: "Loi d'Ohm & circuits", level: "Seconde / Terminale" },
-  { id: "newton", domain: "Mécanique", title: "Lois de Newton & chute libre", level: "Terminale" },
-  { id: "ph", domain: "Chimie", title: "Acido-basicité & titrages", level: "Terminale" },
-  { id: "avancement", domain: "Chimie", title: "Tableau d'avancement", level: "Première" },
-  { id: "unites", domain: "Métrologie", title: "Conversions & chiffres significatifs", level: "Tous niveaux" },
+  { id: "ohm", domain: "Électricité", title: "Loi d'Ohm & circuits", level: "Seconde / Terminale", exerciseId: "ohm-001" },
+  { id: "newton", domain: "Mécanique", title: "Lois de Newton & chute libre", level: "Terminale", exerciseId: "frottements-001" },
+  { id: "ph", domain: "Chimie", title: "Acido-basicité & titrages", level: "Terminale", exerciseId: "titrage-001" },
+  { id: "avancement", domain: "Chimie", title: "Tableau d'avancement", level: "Première", exerciseId: "avancement-001" },
+  { id: "unites", domain: "Métrologie", title: "Conversions & chiffres significatifs", level: "Tous niveaux", exerciseId: "puissance-001" },
 ];
 
 const QUICK_PROMPTS: Record<string, string[]> = {
@@ -30,12 +29,11 @@ const QUICK_PROMPTS: Record<string, string[]> = {
     "Donne-moi un exercice rapide sur la loi d'Ohm",
   ],
   newton: [
-    "Comment projeter le poids sur un axe incliné ?",
     "Pourquoi la vitesse limite existe avec frottements ?",
     "Aide-moi étape par étape sur la 2e loi de Newton",
   ],
   ph: [
-    "Comment repérer l'équivalence sur une courbe pH ?",
+    "Comment utiliser la relation à l'équivalence d'un titrage ?",
     "Quelle est la différence entre acide fort et acide faible ?",
   ],
   avancement: [
@@ -44,64 +42,9 @@ const QUICK_PROMPTS: Record<string, string[]> = {
   ],
   unites: [
     "Règle simple pour les chiffres significatifs",
-    "Comment écrire 0,0045 en notation scientifique ?",
+    "Comment convertir 72 km/h en m/s ?",
   ],
 };
-
-function generateTutorReply(input: string, mode: TutorMode, chapterTitle: string): Message {
-  const lower = input.toLowerCase();
-
-  if (lower.includes("ma") || lower.includes("convert") || lower.includes("unité")) {
-    return {
-      id: `m-${Date.now()}`,
-      role: "ai",
-      text:
-        mode === "guide"
-          ? "Très bonne question ! Le préfixe « milli » (m) signifie un millième (10⁻³). Avant que je fasse le calcul, à ton avis : 250 mA est-il plus grand ou plus petit que 1 A ?"
-          : "Le préfixe « milli » (m) correspond à 10⁻³. Pour passer de mA à A, on divise par 1000 : 250 mA = 250 × 10⁻³ A = 0,25 A.",
-      formula: "1 mA = 10⁻³ A   ⇔   I(A) = I(mA) / 1000",
-      hintStep: mode === "guide" ? "Indice : divise 250 par 1000." : undefined,
-      suggestedFollowUp: ["C'est plus petit, donc 0,25 A ?", "Et pour convertir des grammes en kg ?"],
-    };
-  }
-
-  if (lower.includes("ohm") || lower.includes("r/u") || lower.includes("u =")) {
-    return {
-      id: `m-${Date.now()}`,
-      role: "ai",
-      text:
-        mode === "guide"
-          ? "Astuce pour ne plus jamais inverser ! Pars toujours de la formule de base U = R × I. Si tu veux isoler I, par quoi dois-tu diviser les deux côtés de l'équation ?"
-          : "La loi d'Ohm relie la tension U (en V), la résistance R (en Ω) et l'intensité I (en A) par U = R × I. En divisant par R des deux côtés, on obtient I = U / R.",
-      formula: "U = R · I   ⇒   I = U / R   et   R = U / I",
-      hintStep: mode === "guide" ? "Vérifie aussi les unités : V / Ω = A !" : undefined,
-      suggestedFollowUp: ["On divise par R, donc I = U/R !", "Donne-moi un mini-test"],
-    };
-  }
-
-  if (lower.includes("newton") || lower.includes("frottement") || lower.includes("poids")) {
-    return {
-      id: `m-${Date.now()}`,
-      role: "ai",
-      text:
-        mode === "guide"
-          ? "Pour appliquer la 2e loi de Newton sans erreur, on suit 3 réflexes : 1) Système et référentiel, 2) Bilan des forces, 3) Projection sur les axes. Quelles sont les deux forces qui s'exercent sur une bille qui tombe dans un fluide ?"
-          : "Lors d'une chute avec frottement f = k·v, la force de frottement augmente avec la vitesse jusqu'à compenser exactement le poids P = m·g. L'accélération devient alors nulle : la vitesse reste constante (v_lim = m·g/k).",
-      formula: "ΣF = m·a   ⇒   m·g − k·v = m·(dv/dt)",
-      suggestedFollowUp: ["Le poids P et la force de frottement f", "Comment trouver v_lim ?"],
-    };
-  }
-
-  return {
-    id: `m-${Date.now()}`,
-    role: "ai",
-    text:
-      mode === "guide"
-        ? `Super question sur « ${chapterTitle} » ! Pour bien t'aider sans te donner la réponse toute faite : quelle est la première grandeur ou formule que tu identifies dans ton énoncé ?`
-        : `Voici le point clé pour « ${chapterTitle} » : commence toujours par écrire la relation littérale avec les lettres, vérifie les unités SI (kg, m, s, A, V), puis fais l'application numérique avec le bon nombre de chiffres significatifs.`,
-    suggestedFollowUp: ["Montre-moi un exemple", "Je veux un exercice d'entraînement"],
-  };
-}
 
 export default function StudentTutorPage() {
   const { user, logout } = useAuth();
@@ -110,22 +53,63 @@ export default function StudentTutorPage() {
   const [selectedChapter, setSelectedChapter] = useState(CHAPTERS[0]);
   const [mode, setMode] = useState<TutorMode>("guide");
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number } | null>(null);
+  const [providerBadge, setProviderBadge] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
-      role: "ai",
-      text: "Bonjour ! Je suis ton tuteur IA de Physique-Chimie. Je m'appuie sur le programme officiel du lycée français : je te guide étape par étape pour que tu comprennes vraiment (pas juste te donner la réponse). Sur quoi veux-tu travailler ?",
+      role: "assistant",
+      content:
+        "Bonjour ! Je suis ton tuteur IA de Physique-Chimie. Je m'appuie sur le programme officiel : je te guide étape par étape pour que tu comprennes vraiment. Sur quoi veux-tu travailler ?",
       suggestedFollowUp: QUICK_PROMPTS.ohm,
     },
   ]);
 
-  const sendMessage = (textOverride?: string) => {
+  const sendMessage = async (textOverride?: string) => {
     const content = (textOverride ?? input).trim();
-    if (!content) return;
-    const userMsg: Message = { id: `u-${Date.now()}`, role: "user", text: content };
-    const aiReply = generateTutorReply(content, mode, selectedChapter.title);
-    setMessages((prev) => [...prev, userMsg, aiReply]);
+    if (!content || loading) return;
+
+    const userMsg: Message = { id: `u-${Date.now()}`, role: "user", content };
+    const nextHistory = [...messages, userMsg];
+    setMessages(nextHistory);
     setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/tutor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user?.id,
+          chapterTitle: `${selectedChapter.domain} — ${selectedChapter.title}`,
+          mode,
+          messages: nextHistory.map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json();
+      if (data.quota) setQuotaInfo({ remaining: data.quota.remaining, limit: data.quota.limit });
+      if (data.provider) setProviderBadge(data.provider);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `a-${Date.now()}`,
+          role: "assistant",
+          content: data.reply || data.error || "Impossible de répondre pour le moment.",
+        },
+      ]);
+    } catch {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `e-${Date.now()}`,
+          role: "assistant",
+          content: "Erreur réseau — vérifie ta connexion et réessaie.",
+        },
+      ]);
+    }
+    setLoading(false);
   };
 
   const handleSelectChapter = (ch: typeof CHAPTERS[0]) => {
@@ -133,15 +117,15 @@ export default function StudentTutorPage() {
     setMessages([
       {
         id: `ch-${ch.id}-${Date.now()}`,
-        role: "ai",
-        text: `On passe au chapitre « ${ch.title} » (${ch.domain}). Pose-moi ta question, envoie une photo de ton brouillon, ou clique sur une suggestion ci-dessous !`,
+        role: "assistant",
+        content: `On passe au chapitre « ${ch.title} » (${ch.domain}). Pose-moi ta question ou clique sur une suggestion ci-dessous !`,
         suggestedFollowUp: QUICK_PROMPTS[ch.id] || [],
       },
     ]);
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push("/auth/login");
   };
 
@@ -149,7 +133,6 @@ export default function StudentTutorPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
-      {/* Top bar */}
       <header className="bg-white border-b border-slate-100 px-6 py-3 flex items-center gap-4 sticky top-0 z-20">
         <Link href="/dashboard" className="text-slate-500 hover:text-slate-800 text-sm font-medium">
           ← Tableau de bord
@@ -158,9 +141,11 @@ export default function StudentTutorPage() {
         <div className="flex items-center gap-2">
           <span className="text-lg">🤖</span>
           <span className="font-bold text-slate-900 text-sm">Tuteur IA Physique-Chimie</span>
-          <span className="text-[11px] font-semibold bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-full">
-            ● Programme officiel
-          </span>
+          {quotaInfo && (
+            <span className="text-[11px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+              {quotaInfo.remaining}/{quotaInfo.limit} msg restants aujourd&apos;hui
+            </span>
+          )}
         </div>
         <div className="ml-auto flex items-center gap-3">
           <Link
@@ -172,19 +157,14 @@ export default function StudentTutorPage() {
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-pink-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold uppercase">
             {initials}
           </div>
-          <button
-            onClick={handleLogout}
-            className="text-xs font-medium text-rose-500 hover:text-rose-700"
-          >
+          <button onClick={handleLogout} className="text-xs font-medium text-rose-500 hover:text-rose-700">
             🚪 Déconnexion
           </button>
         </div>
       </header>
 
       <div className="flex-1 max-w-6xl w-full mx-auto p-4 lg:p-6 grid lg:grid-cols-12 gap-6">
-        {/* Left: Chapters & Teaching Mode */}
         <aside className="lg:col-span-4 space-y-5">
-          {/* Teaching Mode selector */}
           <div className="bg-white rounded-3xl border border-slate-100 p-5 shadow-sm">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
               Approche pédagogique
@@ -212,7 +192,6 @@ export default function StudentTutorPage() {
             </div>
           </div>
 
-          {/* Chapters grounded context */}
           <div className="bg-white rounded-3xl border border-slate-100 p-5 shadow-sm">
             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
               Chapitre de référence
@@ -237,25 +216,27 @@ export default function StudentTutorPage() {
           </div>
         </aside>
 
-        {/* Right: Chat workspace */}
         <section className="lg:col-span-8 bg-white rounded-3xl border border-slate-100 shadow-sm flex flex-col h-[76vh]">
-          {/* Chat header */}
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
             <div>
               <div className="text-sm font-extrabold text-slate-900">{selectedChapter.title}</div>
               <div className="text-xs text-slate-400">
                 Mode {mode === "guide" ? "Guidé (indices progressifs)" : mode === "explain" ? "Explication de cours" : "Quiz rapide"}
+                {providerBadge && (
+                  <span className="ml-2 font-mono text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
+                    {providerBadge}
+                  </span>
+                )}
               </div>
             </div>
             <Link
-              href="/exercises"
-              className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3.5 py-2 rounded-xl hover:bg-indigo-100"
+              href={`/exercises/${selectedChapter.exerciseId}`}
+              className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3.5 py-2 rounded-xl hover:bg-indigo-100 whitespace-nowrap"
             >
               Pratiquer ce chapitre →
             </Link>
           </div>
 
-          {/* Messages */}
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
             {messages.map((msg) => (
               <div key={msg.id} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
@@ -266,17 +247,7 @@ export default function StudentTutorPage() {
                       : "bg-slate-50 border border-slate-100 text-slate-800"
                   }`}
                 >
-                  <p>{msg.text}</p>
-                  {msg.formula && (
-                    <div className="mt-3 bg-white border border-indigo-100 rounded-xl px-3.5 py-2 font-mono text-xs text-indigo-700 font-bold">
-                      {msg.formula}
-                    </div>
-                  )}
-                  {msg.hintStep && (
-                    <div className="mt-2.5 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-1.5">
-                      💡 {msg.hintStep}
-                    </div>
-                  )}
+                  <MathText text={msg.content} />
                 </div>
 
                 {msg.suggestedFollowUp && msg.suggestedFollowUp.length > 0 && (
@@ -294,9 +265,9 @@ export default function StudentTutorPage() {
                 )}
               </div>
             ))}
+            {loading && <div className="text-xs text-slate-400 italic">Le tuteur réfléchit…</div>}
           </div>
 
-          {/* Input bar */}
           <div className="p-4 border-t border-slate-100">
             <div className="flex items-center gap-2">
               <Link
@@ -316,7 +287,8 @@ export default function StudentTutorPage() {
               />
               <button
                 onClick={() => sendMessage()}
-                className="bg-indigo-600 text-white font-bold px-5 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm shrink-0"
+                disabled={loading}
+                className="bg-indigo-600 text-white font-bold px-5 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm shrink-0 disabled:opacity-50"
               >
                 Envoyer →
               </button>

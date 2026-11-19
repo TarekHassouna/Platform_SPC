@@ -28,7 +28,6 @@ export function ParentShell({ children }: { children: ReactNode }) {
 
   const navItems = [
     { icon: "🏠", label: "Suivi de mon enfant", href: "/parent/dashboard" },
-    { icon: "💳", label: "Abonnement & factures", href: "/parent/subscription" },
     { icon: "⚙️", label: "Paramètres & RGPD", href: "/parent/settings" },
   ];
 
@@ -76,7 +75,7 @@ export function ParentShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-900 truncate">{parentName}</p>
-            <p className="text-xs text-slate-400">Plan Individuel</p>
+            <p className="text-xs text-slate-400">Suivi scolaire</p>
           </div>
         </div>
         <button

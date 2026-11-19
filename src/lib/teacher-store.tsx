@@ -562,6 +562,44 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
   const addExercise = (ex: Omit<ExerciseItem, "id">): ExerciseItem => {
     const created: ExerciseItem = { ...ex, id: `ex-${Date.now()}` };
     setExercises((prev) => [created, ...prev]);
+
+    const supabase = getSupabaseBrowserClient();
+    if (isSupabaseConfigured && supabase && user?.id) {
+      const diffMap: Record<ExerciseItem["difficulty"], string> = {
+        Guidé: "guided",
+        Standard: "standard",
+        "Type Bac": "bac",
+      };
+      const srcMap: Record<ExerciseItem["source"], string> = {
+        Officiel: "official",
+        "Créé par moi": "teacher",
+        "IA approuvé": "ai_approved",
+      };
+      supabase
+        .from("exercises")
+        .insert({
+          author_id: user.id,
+          level: ex.level,
+          domain: ex.domain,
+          chapter: ex.chapter,
+          difficulty: diffMap[ex.difficulty] || "standard",
+          source: srcMap[ex.source] || "teacher",
+          status: "published",
+        })
+        .select("id")
+        .single()
+        .then(({ data }) => {
+          if (data?.id) {
+            supabase.from("exercise_versions").insert({
+              exercise_id: data.id,
+              version_number: 1,
+              title: ex.title,
+              statement_template: ex.statement,
+              questions_schema: ex.questions,
+            });
+          }
+        });
+    }
     return created;
   };
 
@@ -574,6 +612,20 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
       totalStudents: cls?.students.length || 0,
     };
     setAssignments((prev) => [created, ...prev]);
+
+    const supabase = getSupabaseBrowserClient();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(asg.classId);
+    if (isSupabaseConfigured && supabase && user?.id && isUuid) {
+      supabase
+        .from("assignments")
+        .insert({
+          class_id: asg.classId,
+          teacher_id: user.id,
+          title: asg.title,
+          mode: asg.mode === "Noté" ? "graded" : "practice",
+        })
+        .then(() => {});
+    }
   };
 
   const updateCopy = (copyId: string, updates: Partial<CopySubmission>) => {

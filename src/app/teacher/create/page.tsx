@@ -175,13 +175,26 @@ export default function TeacherCreateExercisePage() {
   const [draft, setDraft] = useState<DraftExercise | null>(null);
   const [publishedBanner, setPublishedBanner] = useState(false);
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setIsGenerating(true);
     setPublishedBanner(false);
-    setTimeout(() => {
-      setDraft(buildDraftFromPrompt(prompt, level, difficulty));
-      setIsGenerating(false);
-    }, 650);
+    try {
+      const res = await fetch("/api/exercises/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, level, difficulty }),
+      });
+      const data = await res.json();
+      if (data.draft) {
+        setDraft(data.draft);
+        setIsGenerating(false);
+        return;
+      }
+    } catch {
+      // Fallback to structured template builder
+    }
+    setDraft(buildDraftFromPrompt(prompt, level, difficulty));
+    setIsGenerating(false);
   };
 
   const handlePublish = () => {

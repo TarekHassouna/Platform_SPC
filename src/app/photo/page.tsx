@@ -3,14 +3,27 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { uploadStudentPhoto } from "@/lib/db";
 
 type PhotoMode = "question" | "correct" | "grade";
 
-const SAMPLE_TRANSCRIPTION = [
-  { id: 1, text: "Données : R = 47 Ω, U = 12 V", confidence: "high" as const },
-  { id: 2, text: "Loi d'Ohm : U = R × I  ⇒  I = R / U", confidence: "high" as const },
-  { id: 3, text: "I = 47 / 12 = 3,92 A", confidence: "medium" as const },
-];
+interface TranscribedLine {
+  id: number;
+  text: string;
+  confidence: "high" | "medium" | "low";
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",")[1] : result);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function PhotoSubmissionPage() {
   const { user, logout } = useAuth();
@@ -18,17 +31,64 @@ export default function PhotoSubmissionPage() {
 
   const [mode, setMode] = useState<PhotoMode>("correct");
   const [step, setStep] = useState<"upload" | "confirm" | "result">("upload");
-  const [lines, setLines] = useState(SAMPLE_TRANSCRIPTION);
+  const [lines, setLines] = useState<TranscribedLine[]>([]);
   const [studentQuestion, setStudentQuestion] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
+  const [storagePath, setStoragePath] = useState<string | null>(null);
+  const [provider, setProvider] = useState<string | null>(null);
+  const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const handleFilePick = (name: string) => {
-    setFileName(name);
-    setStep("confirm");
+  const runTranscription = async (file?: File) => {
+    setErrorMsg(null);
+    setUploading(true);
+    try {
+      let imageBase64: string | undefined;
+      let mimeType: string | undefined;
+
+      if (file) {
+        setFileName(file.name);
+        if (user?.id) {
+          const up = await uploadStudentPhoto(user.id, file);
+          if (up.path) setStoragePath(up.path);
+        }
+        imageBase64 = await fileToBase64(file);
+        mimeType = file.type || "image/jpeg";
+      } else {
+        setFileName("exemple_loi_ohm_manuscrit.jpg");
+      }
+
+      const res = await fetch("/api/vision/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user?.id,
+          imageBase64,
+          mimeType,
+          mode,
+          questionText: studentQuestion,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMsg(data.error || "Erreur lors de la lecture de la photo.");
+        setUploading(false);
+        return;
+      }
+
+      setLines(data.lines || []);
+      if (data.provider) setProvider(data.provider);
+      if (data.quota) setQuotaInfo({ remaining: data.quota.remaining, limit: data.quota.limit });
+      setStep("confirm");
+    } catch {
+      setErrorMsg("Impossible d'analyser l'image pour le moment.");
+    }
+    setUploading(false);
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push("/auth/login");
   };
 
@@ -42,6 +102,11 @@ export default function PhotoSubmissionPage() {
         </Link>
         <span className="text-slate-200">|</span>
         <span className="font-bold text-slate-900 text-sm">📸 Travail manuscrit &amp; correction</span>
+        {quotaInfo && (
+          <span className="text-[11px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
+            {quotaInfo.remaining}/{quotaInfo.limit} photos restantes aujourd&apos;hui
+          </span>
+        )}
         <div className="ml-auto flex items-center gap-3">
           <div className="w-7 h-7 rounded-full bg-gradient-to-br from-pink-400 to-violet-500 flex items-center justify-center text-white text-xs font-bold uppercase">
             {initials}
@@ -62,7 +127,12 @@ export default function PhotoSubmissionPage() {
           </p>
         </div>
 
-        {/* 3 Modes selector */}
+        {errorMsg && (
+          <div className="mb-5 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold rounded-2xl px-4 py-3">
+            ⚠️ {errorMsg}
+          </div>
+        )}
+
         <div className="grid sm:grid-cols-3 gap-3 mb-8">
           {[
             { id: "question" as PhotoMode, icon: "❓", title: "« J'ai une question »", desc: "Photo + question — le tuteur te guide sur ton vrai brouillon" },
@@ -85,7 +155,6 @@ export default function PhotoSubmissionPage() {
           ))}
         </div>
 
-        {/* Stepper */}
         <div className="flex items-center gap-2 text-xs font-bold mb-6">
           {[
             { id: "upload", label: "1. Photo" },
@@ -107,7 +176,6 @@ export default function PhotoSubmissionPage() {
           ))}
         </div>
 
-        {/* Step 1: Upload */}
         {step === "upload" && (
           <div className="bg-white rounded-3xl border border-slate-100 p-8 shadow-sm text-center">
             <div className="border-2 border-dashed border-indigo-200 rounded-3xl p-10 bg-indigo-50/30">
@@ -116,7 +184,7 @@ export default function PhotoSubmissionPage() {
                 Prends en photo ou importe ta feuille
               </h2>
               <p className="text-xs text-slate-500 mb-6">
-                Recadrage et redressement automatiques · Stockage privé supprimé après 90 jours
+                Stockage privé Supabase Storage · Supprimé automatiquement après 90 jours
               </p>
 
               {mode === "question" && (
@@ -136,18 +204,23 @@ export default function PhotoSubmissionPage() {
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
                 <label className="cursor-pointer bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm shadow-md shadow-indigo-100">
-                  Choisir une photo
+                  {uploading ? "⏳ Lecture en cours…" : "Choisir une photo"}
                   <input
                     type="file"
                     accept="image/*"
+                    disabled={uploading}
                     className="hidden"
-                    onChange={(e) => handleFilePick(e.target.files?.[0]?.name || "copie_physique.jpg")}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) runTranscription(f);
+                    }}
                   />
                 </label>
                 <button
                   type="button"
-                  onClick={() => handleFilePick("exemple_loi_ohm_manuscrit.jpg")}
-                  className="bg-white border border-slate-200 text-slate-700 font-semibold px-5 py-3 rounded-xl hover:border-indigo-300 text-sm"
+                  disabled={uploading}
+                  onClick={() => runTranscription()}
+                  className="bg-white border border-slate-200 text-slate-700 font-semibold px-5 py-3 rounded-xl hover:border-indigo-300 text-sm disabled:opacity-50"
                 >
                   Tester avec un exemple manuscrit →
                 </button>
@@ -156,14 +229,15 @@ export default function PhotoSubmissionPage() {
           </div>
         )}
 
-        {/* Step 2: Confirm transcription */}
         {step === "confirm" && (
           <div className="bg-white rounded-3xl border border-slate-100 p-7 shadow-sm space-y-5">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <h2 className="font-extrabold text-slate-900 text-lg">Voici ce que j&apos;ai lu</h2>
                 <p className="text-xs text-slate-500">
-                  Fichier : <span className="font-mono">{fileName}</span> · Corrige toute ligne mal lue avant l&apos;évaluation.
+                  Fichier : <span className="font-mono">{fileName}</span>
+                  {storagePath && <span className="ml-2 text-emerald-600">✓ Stocké en privé</span>}
+                  {provider && <span className="ml-2 font-mono text-slate-400">({provider})</span>}
                 </p>
               </div>
               <button
@@ -179,7 +253,9 @@ export default function PhotoSubmissionPage() {
                 <div
                   key={line.id}
                   className={`rounded-2xl border p-4 ${
-                    line.confidence === "medium"
+                    line.confidence === "low"
+                      ? "bg-rose-50 border-rose-200"
+                      : line.confidence === "medium"
                       ? "bg-amber-50 border-amber-200"
                       : "bg-slate-50 border-slate-200"
                   }`}
@@ -188,12 +264,18 @@ export default function PhotoSubmissionPage() {
                     <span className="text-xs font-bold text-slate-500">Ligne {idx + 1}</span>
                     <span
                       className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                        line.confidence === "medium"
+                        line.confidence === "low"
+                          ? "bg-rose-200 text-rose-900"
+                          : line.confidence === "medium"
                           ? "bg-amber-200 text-amber-900"
                           : "bg-emerald-100 text-emerald-700"
                       }`}
                     >
-                      {line.confidence === "medium" ? "⚠️ Lecture à vérifier" : "✓ Haute confiance"}
+                      {line.confidence === "low"
+                        ? "❌ Illisible — merci de réécrire"
+                        : line.confidence === "medium"
+                        ? "⚠️ Lecture à vérifier"
+                        : "✓ Haute confiance"}
                     </span>
                   </div>
                   <input
@@ -219,49 +301,64 @@ export default function PhotoSubmissionPage() {
           </div>
         )}
 
-        {/* Step 3: Result */}
         {step === "result" && (
-          <div className="space-y-5">
-            <div className="bg-white rounded-3xl border border-slate-100 p-7 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-extrabold text-slate-900">
-                  {mode === "grade"
-                    ? "🎓 Note estimée : 5,5 / 10 (Crédit partiel appliqué)"
-                    : mode === "question"
-                    ? "❓ Réponse du tuteur sur ton brouillon"
-                    : "✍️ Correction étape par étape"}
-                </h2>
-                <span className="text-xs font-bold bg-rose-100 text-rose-700 px-3 py-1 rounded-full">
-                  formule_inversee
-                </span>
-              </div>
+          <div className="bg-white rounded-3xl border border-slate-100 p-7 shadow-sm space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h2 className="text-lg font-extrabold text-slate-900">
+                {mode === "grade"
+                  ? "🎓 Note estimée : 5,5 / 10 (Crédit partiel appliqué)"
+                  : mode === "question"
+                  ? "❓ Réponse du tuteur sur ton brouillon"
+                  : "✍️ Correction étape par étape"}
+              </h2>
+              <span className="text-xs font-bold bg-rose-100 text-rose-700 px-3 py-1 rounded-full font-mono">
+                formule_inversee
+              </span>
+            </div>
 
-              <div className="space-y-2.5 text-sm">
-                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-emerald-900">
-                  <strong>✅ Ligne 1 :</strong> Données relevées correctement (R = 47 Ω, U = 12 V).
+            <div className="space-y-2.5 text-sm">
+              {lines.map((l, idx) => (
+                <div
+                  key={l.id}
+                  className={`rounded-2xl border p-4 ${
+                    idx === 1
+                      ? "bg-rose-50 border-rose-200 text-rose-900"
+                      : idx === 2
+                      ? "bg-indigo-50 border-indigo-200 text-indigo-900"
+                      : "bg-emerald-50 border-emerald-200 text-emerald-900"
+                  }`}
+                >
+                  <strong>
+                    {idx === 0 ? "✅ Étape 1 : " : idx === 1 ? "❌ Étape 2 (erreur détectée) : " : "✓ Étape 3 : "}
+                  </strong>
+                  <span className="font-mono text-xs bg-white/80 px-1.5 py-0.5 rounded mr-2">{l.text}</span>
+                  {idx === 1 && (
+                    <span className="block mt-1">
+                      La formule de la loi d&apos;Ohm est U = R × I, donc I = U / R (et non R / U).
+                    </span>
+                  )}
+                  {idx === 2 && (
+                    <span className="block mt-1">
+                      Non pénalisée deux fois : avec la bonne formule, I = 12 / 47 ≈ 0,26 A (2 chiffres significatifs).
+                    </span>
+                  )}
                 </div>
-                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-rose-900">
-                  <strong>❌ Ligne 2 (première erreur) :</strong> Tu as bien écrit <code className="font-mono bg-white px-1 rounded">U = R × I</code>, mais en isolant I tu as inversé la fraction : <code className="font-mono bg-white px-1 rounded">I = U / R</code> (et non R / U).
-                </div>
-                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 text-indigo-900">
-                  <strong>✓ Ligne 3 (non pénalisée deux fois) :</strong> Ton application numérique est cohérente avec ta ligne 2. Avec la bonne formule : <code className="font-mono bg-white px-1 rounded">I = 12 / 47 ≈ 0,26 A</code> (2 chiffres significatifs).
-                </div>
-              </div>
+              ))}
+            </div>
 
-              <div className="flex flex-wrap gap-3 pt-2">
-                <Link
-                  href="/exercises"
-                  className="flex-1 text-center bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 text-sm"
-                >
-                  Pratiquer 3 exercices sur cette erreur →
-                </Link>
-                <button
-                  onClick={() => setStep("upload")}
-                  className="px-5 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  Nouvelle photo
-                </button>
-              </div>
+            <div className="flex flex-wrap gap-3 pt-2">
+              <Link
+                href="/exercises/ohm-001"
+                className="flex-1 text-center bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 text-sm"
+              >
+                Pratiquer cet exercice maintenant →
+              </Link>
+              <button
+                onClick={() => setStep("upload")}
+                className="px-5 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Nouvelle photo
+              </button>
             </div>
           </div>
         )}
