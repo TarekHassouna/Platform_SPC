@@ -191,7 +191,7 @@ export default function SignupPage() {
           </Link>
           <h1 className="text-2xl font-extrabold text-slate-900">Créer un compte</h1>
           <p className="text-slate-500 mt-1 text-sm flex items-center justify-center gap-2">
-            <span>Essai gratuit · Sans carte bancaire</span>
+            <span>Espace pédagogique Physique-Chimie</span>
             <span
               className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                 authMode === "supabase"
