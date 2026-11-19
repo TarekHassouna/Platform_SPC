@@ -1,12 +1,16 @@
+"use client";
+import { useAuth } from "@/lib/auth-context";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import Link from "next/link";
 
 const masterySkills = [
-  { name: "Loi d'Ohm", status: "acquired", score: 92, domain: "Électricité" },
-  { name: "Résistances en série / parallèle", status: "developing", score: 61, domain: "Électricité" },
-  { name: "Conversion d'unités", status: "weak", score: 34, domain: "Métrologie" },
-  { name: "Lois de Newton", status: "acquired", score: 88, domain: "Mécanique" },
-  { name: "Chute libre", status: "developing", score: 55, domain: "Mécanique" },
-  { name: "Notation scientifique", status: "weak", score: 28, domain: "Métrologie" },
+  { name: "Loi d'Ohm", status: "acquired", score: 92 },
+  { name: "Résistances en série / parallèle", status: "developing", score: 61 },
+  { name: "Conversion d'unités", status: "weak", score: 34 },
+  { name: "Lois de Newton", status: "acquired", score: 88 },
+  { name: "Chute libre", status: "developing", score: 55 },
+  { name: "Notation scientifique", status: "weak", score: 28 },
 ];
 
 const recommended = [
@@ -22,6 +26,31 @@ const statusStyles: Record<string, { bg: string; text: string; label: string }> 
 };
 
 export default function DashboardPage() {
+  const { user, logout } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (user && user.role !== "student") {
+      if (user.role === "teacher") router.replace("/teacher/dashboard");
+      else if (user.role === "org_admin") router.replace("/org/dashboard");
+      else router.replace("/parent/dashboard");
+    }
+  }, [user, router]);
+
+  const displayName = user ? `${user.firstName} ${user.lastName}`.trim() : "Élève";
+  const initials = user ? (user.firstName[0] ?? "") + (user.lastName?.[0] ?? "") : "?";
+  const level = user?.level || "Terminale";
+
+  const handleLogout = () => { logout(); router.push("/auth/login"); };
+
+  const navItems = [
+    { icon: "🏠", label: "Tableau de bord", href: "/dashboard", active: true },
+    { icon: "📚", label: "Exercices", href: "/exercises", active: false },
+    { icon: "🗺️", label: "Ma progression", href: "/progress", active: false },
+    { icon: "💬", label: "Tuteur IA", href: "/tutor", active: false },
+    { icon: "📸", label: "Photo & correction", href: "/photo", active: false },
+  ];
+
   return (
     <div className="min-h-screen bg-slate-50 flex">
       {/* SIDEBAR */}
@@ -33,50 +62,43 @@ export default function DashboardPage() {
           </div>
         </div>
         <nav className="flex-1 p-4 space-y-1">
-          {[
-            { icon: "🏠", label: "Tableau de bord", href: "/dashboard", active: true },
-            { icon: "📚", label: "Exercices", href: "/exercises", active: false },
-            { icon: "🗺️", label: "Ma progression", href: "/progress", active: false },
-            { icon: "💬", label: "Tuteur IA", href: "/tutor", active: false },
-            { icon: "📸", label: "Photo & correction", href: "/photo", active: false },
-          ].map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                item.active
-                  ? "bg-indigo-50 text-indigo-700"
-                  : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-              }`}
-            >
+          {navItems.map((item) => (
+            <Link key={item.label} href={item.href}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${item.active ? "bg-indigo-50 text-indigo-700" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}>
               <span className="text-base">{item.icon}</span>
               {item.label}
             </Link>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-100">
+        <div className="p-4 border-t border-slate-100 space-y-1">
           <div className="flex items-center gap-3 px-4 py-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-violet-500 flex items-center justify-center text-white text-sm font-bold">A</div>
-            <div>
-              <p className="text-sm font-semibold text-slate-900">Amira B.</p>
-              <p className="text-xs text-slate-400">Terminale — Plan individuel</p>
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-violet-500 flex items-center justify-center text-white text-sm font-bold uppercase">
+              {initials}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-slate-900 truncate">{displayName}</p>
+              <p className="text-xs text-slate-400">{level} — Plan individuel</p>
             </div>
           </div>
+          <button onClick={handleLogout}
+            className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium text-rose-500 hover:bg-rose-50 transition-all w-full">
+            <span className="text-base">🚪</span>
+            Se déconnecter
+          </button>
         </div>
       </aside>
 
       {/* MAIN */}
       <main className="flex-1 lg:ml-64 p-6 lg:p-10">
-        {/* Header */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-extrabold text-slate-900">Bonjour Amira 👋</h1>
+            <h1 className="text-2xl font-extrabold text-slate-900">
+              Bonjour {user?.firstName || "..."} 👋
+            </h1>
             <p className="text-slate-500 mt-1">Tu as 3 exercices de révision à faire aujourd'hui.</p>
           </div>
-          <Link
-            href="/exercises"
-            className="hidden sm:inline-flex items-center gap-2 bg-indigo-600 text-white font-semibold px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors text-sm"
-          >
+          <Link href="/exercises"
+            className="hidden sm:inline-flex items-center gap-2 bg-indigo-600 text-white font-semibold px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
             Pratiquer maintenant →
           </Link>
         </div>
@@ -109,10 +131,8 @@ export default function DashboardPage() {
                     <div className="font-bold text-slate-900">{r.title}</div>
                     <div className="text-sm text-slate-500">{r.type} · {r.count} exercices</div>
                   </div>
-                  <Link
-                    href="/exercises"
-                    className="bg-white border border-slate-200 text-slate-700 text-sm font-semibold px-4 py-2 rounded-xl hover:border-indigo-300 hover:text-indigo-600 transition-all whitespace-nowrap"
-                  >
+                  <Link href="/exercises"
+                    className="bg-white border border-slate-200 text-slate-700 text-sm font-semibold px-4 py-2 rounded-xl hover:border-indigo-300 hover:text-indigo-600 transition-all whitespace-nowrap">
                     Commencer →
                   </Link>
                 </div>
@@ -120,7 +140,7 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Quick mastery */}
+          {/* Mastery */}
           <div>
             <h2 className="text-lg font-bold text-slate-900 mb-4">Carte de maîtrise</h2>
             <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-3">
@@ -131,18 +151,11 @@ export default function DashboardPage() {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-slate-800 truncate">{skill.name}</div>
                       <div className="mt-1.5 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${
-                            skill.status === "acquired" ? "bg-emerald-500" :
-                            skill.status === "developing" ? "bg-amber-400" : "bg-rose-400"
-                          }`}
-                          style={{ width: `${skill.score}%` }}
-                        />
+                        <div className={`h-full rounded-full ${skill.status === "acquired" ? "bg-emerald-500" : skill.status === "developing" ? "bg-amber-400" : "bg-rose-400"}`}
+                          style={{ width: `${skill.score}%` }} />
                       </div>
                     </div>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${s.bg} ${s.text}`}>
-                      {s.label}
-                    </span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${s.bg} ${s.text}`}>{s.label}</span>
                   </div>
                 );
               })}
