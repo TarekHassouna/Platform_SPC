@@ -8,11 +8,13 @@ export type Level = "Seconde" | "Première" | "Terminale";
 
 export interface StudentAttemptRecord {
   id: string;
+  evaluationResultId?: string;
   exerciseTitle: string;
   score: number;
   maxScore: number;
   pct: number;
   status: string;
+  feedbackSummary?: string;
   submittedAt: string;
   answers: Record<string, string>;
 }
@@ -122,6 +124,14 @@ interface TeacherStoreContextType {
   toggleAssignmentHints: (assignmentId: string) => Promise<void>;
   toggleAssignmentVisibility: (assignmentId: string) => Promise<void>;
   updateAssignmentTimeLimit: (assignmentId: string, minutes: number | null) => Promise<void>;
+  updateStudentAttemptGrade: (params: {
+    studentId: string;
+    submissionId: string;
+    evaluationResultId?: string;
+    newScore: number;
+    maxScore: number;
+    teacherComment?: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
   copies: CopySubmission[];
   updateCopy: (copyId: string, updates: Partial<CopySubmission>) => void;
 }
@@ -242,7 +252,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           supabase
             .from("submissions")
             .select(
-              "id, student_id, assignment_id, input_mode, rendered_params, raw_answers, created_at, evaluation_results(score, max_score, status, feedback_summary)"
+              "id, student_id, assignment_id, input_mode, rendered_params, raw_answers, created_at, evaluation_results(id, score, max_score, status, feedback_summary)"
             )
             .in("student_id", uniqueStudentIds)
             .order("created_at", { ascending: false }),
@@ -308,14 +318,16 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           exStat.count += 1;
           entry.byExercise.set(exTitle, exStat);
 
-          if (entry.recentAttempts.length < 12) {
+          if (entry.recentAttempts.length < 50) {
             entry.recentAttempts.push({
               id: String(s.id),
+              evaluationResultId: ev?.id ? String(ev.id) : undefined,
               exerciseTitle: exTitle,
               score,
               maxScore,
               pct,
               status: String(ev?.status || "incorrect"),
+              feedbackSummary: ev?.feedback_summary ? String(ev.feedback_summary) : undefined,
               submittedAt: new Date(String(s.created_at)).toLocaleString("fr-FR"),
               answers: cleanAnswers,
             });
@@ -876,6 +888,122 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const updateStudentAttemptGrade = async (params: {
+    studentId: string;
+    submissionId: string;
+    evaluationResultId?: string;
+    newScore: number;
+    maxScore: number;
+    teacherComment?: string;
+  }): Promise<{ ok: boolean; error?: string }> => {
+    const clampedScore = Math.max(0, Math.min(params.maxScore, Number(params.newScore)));
+    const nextPct = params.maxScore > 0 ? Math.round((clampedScore / params.maxScore) * 100) : 0;
+    const nextStatus =
+      nextPct >= 95 ? "correct" : nextPct > 0 ? "partially_correct" : "incorrect";
+    const summaryText =
+      params.teacherComment?.trim() || `Note modifiée par l'enseignant (${clampedScore}/${params.maxScore})`;
+
+    const supabase = getSupabaseBrowserClient();
+    if (isSupabaseConfigured && supabase && user?.id) {
+      if (params.evaluationResultId) {
+        const { data: updatedRows, error } = await supabase
+          .from("evaluation_results")
+          .update({
+            score: clampedScore,
+            status: nextStatus,
+            feedback_summary: summaryText,
+          })
+          .eq("id", params.evaluationResultId)
+          .select("id");
+
+        if (error) {
+          return { ok: false, error: error.message };
+        }
+        if (!updatedRows || updatedRows.length === 0) {
+          return {
+            ok: false,
+            error:
+              "Autorisation SQL manquante : exécute supabase/teacher_grade_override.sql dans Supabase SQL Editor.",
+          };
+        }
+      } else {
+        const { error } = await supabase.from("evaluation_results").insert({
+          submission_id: params.submissionId,
+          status: nextStatus,
+          score: clampedScore,
+          max_score: params.maxScore,
+          engine: "teacher_override",
+          feedback_summary: summaryText,
+        });
+        if (error) {
+          return {
+            ok: false,
+            error:
+              error.message.includes("row-level security")
+                ? "Autorisation SQL manquante : exécute supabase/teacher_grade_override.sql dans Supabase SQL Editor."
+                : error.message,
+          };
+        }
+      }
+    }
+
+    // Recompute student metrics live in local state
+    setClasses((prev) =>
+      prev.map((cls) => ({
+        ...cls,
+        students: cls.students.map((stu) => {
+          if (stu.id !== params.studentId) return stu;
+          const updatedAttempts = stu.recentAttempts.map((att) =>
+            att.id === params.submissionId
+              ? {
+                  ...att,
+                  score: clampedScore,
+                  pct: nextPct,
+                  status: nextStatus,
+                  feedbackSummary: summaryText,
+                }
+              : att
+          );
+
+          const byEx = new Map<string, { sum: number; count: number }>();
+          let totalSum = 0;
+          updatedAttempts.forEach((a) => {
+            totalSum += a.pct;
+            const prevEx = byEx.get(a.exerciseTitle) || { sum: 0, count: 0 };
+            prevEx.sum += a.pct;
+            prevEx.count += 1;
+            byEx.set(a.exerciseTitle, prevEx);
+          });
+
+          const nextSkills = { ...stu.skills };
+          byEx.forEach((v, title) => {
+            nextSkills[title] = Math.round(v.sum / v.count);
+          });
+
+          const nextAccuracy =
+            updatedAttempts.length > 0 ? Math.round(totalSum / updatedAttempts.length) : stu.accuracy;
+
+          return {
+            ...stu,
+            accuracy: nextAccuracy,
+            skills: nextSkills,
+            recentAttempts: updatedAttempts,
+            status:
+              updatedAttempts.length === 0
+                ? "active"
+                : nextAccuracy >= 80
+                ? "top"
+                : nextAccuracy < 55
+                ? "struggling"
+                : "active",
+          };
+        }),
+      }))
+    );
+
+    return { ok: true };
+  };
+
   const updateCopy = (copyId: string, updates: Partial<CopySubmission>) => {
     setCopies((prev) => prev.map((c) => (c.id === copyId ? { ...c, ...updates } : c)));
   };
@@ -900,6 +1028,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         toggleAssignmentHints,
         toggleAssignmentVisibility,
         updateAssignmentTimeLimit,
+        updateStudentAttemptGrade,
         copies,
         updateCopy,
       }}

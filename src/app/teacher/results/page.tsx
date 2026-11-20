@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { useTeacherStore } from "@/lib/teacher-store";
+import { useEffect, useMemo, useState } from "react";
+import { useTeacherStore, type StudentAttemptRecord } from "@/lib/teacher-store";
 import { TeacherShell } from "@/components/TeacherShell";
 
 function cellStyle(score: number) {
@@ -10,45 +10,161 @@ function cellStyle(score: number) {
   return "bg-rose-100 text-rose-800 border-rose-200 font-bold";
 }
 
+const COLS_PER_PAGE = 4;
+
 export default function TeacherResultsPage() {
-  const { classes, selectedClassId, setSelectedClassId } = useTeacherStore();
+  const {
+    classes,
+    selectedClassId,
+    setSelectedClassId,
+    updateStudentAttemptGrade,
+  } = useTeacherStore();
+
   const [remediatedSkills, setRemediatedSkills] = useState<string[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<string>("");
+  const [studentSearch, setStudentSearch] = useState("");
+  const [colPage, setColPage] = useState(0);
 
-  // Pick a concrete class for the heatmap matrix (default to first class if "all")
-  const activeClass =
-    classes.find((c) => c.id === selectedClassId) || classes[0];
+  // Inline grade editing state keyed by submission id
+  const [openAttemptId, setOpenAttemptId] = useState<string | null>(null);
+  const [draftScore, setDraftScore] = useState<string>("");
+  const [draftComment, setDraftComment] = useState<string>("");
+  const [savingGrade, setSavingGrade] = useState(false);
+  const [gradeNotice, setGradeNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const handleRemediation = (skill: string, count: number) => {
+  const activeClass = classes.find((c) => c.id === selectedClassId) || classes[0];
+
+  const allSkills = activeClass?.skills || [];
+  const totalPages = Math.max(1, Math.ceil(allSkills.length / COLS_PER_PAGE));
+
+  // Reset pagination when class changes
+  useEffect(() => {
+    setColPage(0);
+    setSelectedExercise("");
+    setSelectedStudentId(null);
+    setOpenAttemptId(null);
+    setGradeNotice(null);
+  }, [activeClass?.id]);
+
+  // Visible columns in heatmap: either the 1 chosen exercise OR a compact paginated window of 4 columns
+  const visibleSkills = useMemo(() => {
+    if (selectedExercise && allSkills.includes(selectedExercise)) {
+      return [selectedExercise];
+    }
+    const safePage = Math.min(colPage, totalPages - 1);
+    return allSkills.slice(safePage * COLS_PER_PAGE, (safePage + 1) * COLS_PER_PAGE);
+  }, [allSkills, selectedExercise, colPage, totalPages]);
+
+  const filteredStudents = useMemo(() => {
+    const list = activeClass?.students || [];
+    if (!studentSearch.trim()) return list;
+    const q = studentSearch.toLowerCase();
+    return list.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.email.toLowerCase().includes(q)
+    );
+  }, [activeClass?.students, studentSearch]);
+
+  const selectedStudent = activeClass?.students.find((s) => s.id === selectedStudentId) || null;
+
+  // All distinct exercise titles attempted in this class (for the correction selector)
+  const attemptedExercises = useMemo(() => {
+    const set = new Set<string>();
+    (activeClass?.students || []).forEach((s) => {
+      s.recentAttempts.forEach((a) => set.add(a.exerciseTitle));
+    });
+    return Array.from(set);
+  }, [activeClass?.students]);
+
+  // Attempts to display in the Correction Panel: ONLY for the exercise chosen by the teacher!
+  const chosenCorrectionRows = useMemo(() => {
+    if (!activeClass || !selectedExercise) return [];
+    const targetStudents = selectedStudent
+      ? [selectedStudent]
+      : activeClass.students;
+
+    const rows: { studentId: string; studentName: string; studentEmail: string; attempt: StudentAttemptRecord }[] = [];
+    targetStudents.forEach((stu) => {
+      stu.recentAttempts
+        .filter((a) => a.exerciseTitle === selectedExercise)
+        .forEach((attempt) => {
+          rows.push({
+            studentId: stu.id,
+            studentName: stu.name,
+            studentEmail: stu.email,
+            attempt,
+          });
+        });
+    });
+    return rows;
+  }, [activeClass, selectedExercise, selectedStudent]);
+
+  const handleRemediation = (skill: string) => {
+    if (!activeClass) return;
     setRemediatedSkills((prev) => [...prev, `${activeClass.id}-${skill}`]);
-    setTimeout(() => {
-      // keep badge visible
-    }, 3000);
-    void count;
   };
 
-  const selectedStudent = activeClass?.students.find((s) => s.id === selectedStudentId);
+  const openEditorForAttempt = (att: StudentAttemptRecord) => {
+    if (openAttemptId === att.id) {
+      setOpenAttemptId(null);
+      return;
+    }
+    setOpenAttemptId(att.id);
+    setDraftScore(String(att.score));
+    setDraftComment(att.feedbackSummary || "");
+    setGradeNotice(null);
+  };
+
+  const handleSaveGrade = async (studentId: string, att: StudentAttemptRecord) => {
+    const parsed = parseFloat(draftScore.replace(",", "."));
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > att.maxScore) {
+      setGradeNotice({
+        ok: false,
+        text: `Entre une note valide entre 0 et ${att.maxScore}.`,
+      });
+      return;
+    }
+    setSavingGrade(true);
+    setGradeNotice(null);
+    const res = await updateStudentAttemptGrade({
+      studentId,
+      submissionId: att.id,
+      evaluationResultId: att.evaluationResultId,
+      newScore: parsed,
+      maxScore: att.maxScore,
+      teacherComment: draftComment,
+    });
+    setSavingGrade(false);
+    if (res.ok) {
+      setGradeNotice({
+        ok: true,
+        text: `✅ Note mise à jour (${parsed.toFixed(2)} / ${att.maxScore}) et enregistrée dans Supabase !`,
+      });
+    } else {
+      setGradeNotice({
+        ok: false,
+        text: res.error || "Impossible d'enregistrer la note.",
+      });
+    }
+  };
 
   return (
     <TeacherShell>
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900">📊 Résultats &amp; Heatmap par compétence</h1>
+          <h1 className="text-2xl font-extrabold text-slate-900">📊 Résultats, Corrections &amp; Notes</h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Visualisez en un coup d&apos;œil où chaque élève bloque et envoyez une remédiation ciblée en 1 clic.
+            Choisis un exercice pour inspecter uniquement ses copies et modifier les notes de tes élèves librement.
           </p>
         </div>
       </div>
 
       {/* Class tabs */}
-      <div className="flex items-center gap-2 flex-wrap mb-6">
+      <div className="flex items-center gap-2 flex-wrap mb-5">
         {classes.map((cls) => (
           <button
             key={cls.id}
-            onClick={() => {
-              setSelectedClassId(cls.id);
-              setSelectedStudentId(null);
-            }}
+            onClick={() => setSelectedClassId(cls.id)}
             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
               activeClass?.id === cls.id
                 ? "bg-indigo-600 text-white shadow-md shadow-indigo-100"
@@ -62,18 +178,76 @@ export default function TeacherResultsPage() {
 
       {!activeClass || activeClass.students.length === 0 ? (
         <div className="bg-white rounded-3xl border border-slate-100 p-10 text-center text-sm text-slate-500">
-          Aucun élève dans cette classe pour afficher la heatmap.
+          Aucun élève dans cette classe pour afficher les résultats.
         </div>
       ) : (
         <>
-          {/* Heatmap Table */}
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden mb-8">
+          {/* Compact Controls Bar (prevents huge horizontal tables when there are 20+ exercises) */}
+          <div className="bg-white rounded-2xl border border-slate-100 p-4 mb-5 shadow-xs flex flex-col md:flex-row items-stretch md:items-center gap-3">
+            <div className="flex-1 flex flex-col sm:flex-row gap-2.5">
+              <select
+                value={selectedExercise}
+                onChange={(e) => {
+                  setSelectedExercise(e.target.value);
+                  setOpenAttemptId(null);
+                  setGradeNotice(null);
+                }}
+                className="flex-1 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 bg-white outline-none focus:border-indigo-400"
+              >
+                <option value="">
+                  📋 Tous les exercices ({allSkills.length} — vue compacte {COLS_PER_PAGE}/page)
+                </option>
+                {allSkills.map((sk) => (
+                  <option key={sk} value={sk}>
+                    🎯 Uniquement : {sk}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="text"
+                value={studentSearch}
+                onChange={(e) => setStudentSearch(e.target.value)}
+                placeholder="Rechercher un élève…"
+                className="sm:w-56 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-indigo-400"
+              />
+            </div>
+
+            {!selectedExercise && totalPages > 1 && (
+              <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                <button
+                  type="button"
+                  disabled={colPage === 0}
+                  onClick={() => setColPage((p) => Math.max(0, p - 1))}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  ←
+                </button>
+                <span className="text-xs font-semibold text-slate-500 whitespace-nowrap">
+                  Page {colPage + 1} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={colPage >= totalPages - 1}
+                  onClick={() => setColPage((p) => Math.min(totalPages - 1, p + 1))}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  →
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Compact Heatmap Table */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden mb-7">
             <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h2 className="font-bold text-slate-900">
-                  Matrice Élèves × Compétences — {activeClass.name}
+                  Matrice Élèves × Exercices — {activeClass.name}
                 </h2>
-                <p className="text-xs text-slate-400">Cliquez sur un élève pour voir le détail de ses lacunes</p>
+                <p className="text-xs text-slate-400">
+                  Clique sur un exercice (colonne ou note) pour afficher uniquement sa correction et modifier la note
+                </p>
               </div>
               <div className="flex items-center gap-3 text-xs text-slate-500">
                 <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-200 inline-block" />≥ 80%</span>
@@ -89,32 +263,52 @@ export default function TeacherResultsPage() {
                     <th className="py-3.5 px-5 text-xs font-bold text-slate-500 uppercase tracking-wider sticky left-0 bg-slate-50">
                       Élève
                     </th>
-                    {activeClass.skills.map((skill) => (
-                      <th key={skill} className="py-3.5 px-3 text-xs font-bold text-slate-600 text-center min-w-[110px]">
-                        {skill}
+                    {visibleSkills.map((skill) => (
+                      <th key={skill} className="py-3.5 px-3 text-xs font-bold text-slate-600 text-center min-w-[140px]">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSelectedExercise((prev) => (prev === skill ? "" : skill))
+                          }
+                          title="Cliquer pour ouvrir les copies de cet exercice"
+                          className={`hover:text-indigo-600 transition-colors leading-snug ${
+                            selectedExercise === skill ? "text-indigo-700 underline" : ""
+                          }`}
+                        >
+                          {skill}
+                        </button>
                       </th>
                     ))}
                     <th className="py-3.5 px-4 text-xs font-bold text-slate-500 text-center">Moyenne</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {activeClass.students.map((stu) => (
+                  {filteredStudents.map((stu) => (
                     <tr
                       key={stu.id}
-                      onClick={() => setSelectedStudentId(stu.id === selectedStudentId ? null : stu.id)}
-                      className={`hover:bg-indigo-50/30 transition-colors cursor-pointer ${
-                        selectedStudentId === stu.id ? "bg-indigo-50/50" : ""
+                      className={`hover:bg-indigo-50/30 transition-colors ${
+                        selectedStudentId === stu.id ? "bg-indigo-50/40" : ""
                       }`}
                     >
-                      <td className="py-3.5 px-5 font-semibold text-sm text-slate-900 whitespace-nowrap sticky left-0 bg-white">
+                      <td
+                        onClick={() =>
+                          setSelectedStudentId((prev) => (prev === stu.id ? null : stu.id))
+                        }
+                        className="py-3.5 px-5 font-semibold text-sm text-slate-900 whitespace-nowrap sticky left-0 bg-white cursor-pointer"
+                      >
                         <div className="flex items-center gap-2.5">
                           <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-bold">
                             {stu.name[0]}
                           </div>
-                          <span>{stu.name}</span>
+                          <div>
+                            <div>{stu.name}</div>
+                            <div className="text-[10px] font-normal text-slate-400">
+                              {stu.exercisesDone} soumission(s)
+                            </div>
+                          </div>
                         </div>
                       </td>
-                      {activeClass.skills.map((skill) => {
+                      {visibleSkills.map((skill) => {
                         const val = stu.skills[skill];
                         return (
                           <td key={skill} className="py-2.5 px-2 text-center">
@@ -123,11 +317,19 @@ export default function TeacherResultsPage() {
                                 —
                               </span>
                             ) : (
-                              <span
-                                className={`inline-block w-14 py-1.5 rounded-xl text-xs border ${cellStyle(val)}`}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedStudentId(stu.id);
+                                  setSelectedExercise(skill);
+                                  setOpenAttemptId(null);
+                                  setGradeNotice(null);
+                                }}
+                                title="Voir la copie de cet exercice et modifier la note"
+                                className={`inline-block w-16 py-1.5 rounded-xl text-xs border transition-transform hover:scale-105 cursor-pointer ${cellStyle(val)}`}
                               >
                                 {val}%
-                              </span>
+                              </button>
                             )}
                           </td>
                         );
@@ -138,12 +340,12 @@ export default function TeacherResultsPage() {
                     </tr>
                   ))}
 
-                  {/* Class average + 1-click remediation row */}
+                  {/* 1-click remediation row */}
                   <tr className="bg-slate-50/90 border-t-2 border-slate-200">
                     <td className="py-4 px-5 text-xs font-extrabold text-slate-700 uppercase sticky left-0 bg-slate-50">
                       Action remédiation
                     </td>
-                    {activeClass.skills.map((skill) => {
+                    {visibleSkills.map((skill) => {
                       const evaluatedStudents = activeClass.students.filter(
                         (s) => s.skills[skill] !== undefined
                       );
@@ -157,7 +359,7 @@ export default function TeacherResultsPage() {
                             <span className="text-[11px] text-slate-400">Non évalué</span>
                           ) : strugglingStudents.length > 0 ? (
                             <button
-                              onClick={() => handleRemediation(skill, strugglingStudents.length)}
+                              onClick={() => handleRemediation(skill)}
                               disabled={sent}
                               className={`text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition-all whitespace-nowrap ${
                                 sent
@@ -182,109 +384,234 @@ export default function TeacherResultsPage() {
             </div>
           </div>
 
-          {/* Selected student detail card */}
-          {selectedStudent && (
-            <div className="bg-white rounded-3xl border border-indigo-200 p-6 shadow-sm space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-extrabold text-slate-900">
-                    Fiche rapide — {selectedStudent.name}
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {selectedStudent.email} · {selectedStudent.exercisesDone} soumission(s) · Moyenne globale :{" "}
-                    <strong>{selectedStudent.exercisesDone > 0 ? `${selectedStudent.accuracy}%` : "—"}</strong> · Dernière activité :{" "}
-                    {selectedStudent.lastActive}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setSelectedStudentId(null)}
-                  className="text-xs font-semibold text-slate-400 hover:text-slate-700"
-                >
-                  Fermer ×
-                </button>
+          {/* Focused Correction & Manual Grade Editor Panel (shows ONLY the exercise you choose!) */}
+          <div className="bg-white rounded-3xl border border-indigo-200 p-6 shadow-sm space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-900">
+                  📝 Correction &amp; Modification de note
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Sélectionne un exercice précis ci-dessous (ou clique sur une note dans le tableau) pour voir uniquement ses copies et changer les notes.
+                </p>
               </div>
-
-              {/* Skills / chapters breakdown */}
-              {Object.keys(selectedStudent.skills).length > 0 && (
-                <div>
-                  <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
-                    Maîtrise par exercice / compétence
-                  </div>
-                  <div className="grid sm:grid-cols-3 gap-3">
-                    {Object.entries(selectedStudent.skills).map(([sk, val]) => (
-                      <div key={sk} className="bg-slate-50 rounded-2xl p-3.5 border border-slate-100">
-                        <div className="flex justify-between gap-2 text-xs font-semibold mb-1.5">
-                          <span className="text-slate-700 line-clamp-2">{sk}</span>
-                          <span
-                            className={`shrink-0 ${
-                              val < 50 ? "text-rose-600" : val < 75 ? "text-amber-600" : "text-emerald-600"
-                            }`}
-                          >
-                            {val}%
-                          </span>
-                        </div>
-                        <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full ${
-                              val < 50 ? "bg-rose-500" : val < 75 ? "bg-amber-400" : "bg-emerald-500"
-                            }`}
-                            style={{ width: `${val}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+              {selectedStudent && (
+                <div className="flex items-center gap-2 bg-indigo-50 text-indigo-800 px-3 py-1.5 rounded-xl text-xs font-bold self-start sm:self-auto">
+                  <span>Élève : {selectedStudent.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudentId(null)}
+                    className="text-indigo-500 hover:text-indigo-900"
+                  >
+                    × Tous
+                  </button>
                 </div>
               )}
+            </div>
 
-              {/* Recent real submissions */}
-              <div>
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
-                  Historique réel des tentatives ({selectedStudent.recentAttempts.length})
-                </div>
-                {selectedStudent.recentAttempts.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">
-                    Cet élève n&apos;a pas encore soumis d&apos;exercice.
-                  </p>
-                ) : (
-                  <div className="space-y-2.5">
-                    {selectedStudent.recentAttempts.map((att) => (
-                      <div
-                        key={att.id}
-                        className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col gap-2"
-                      >
-                        <div className="flex items-center justify-between gap-3 flex-wrap">
-                          <div>
-                            <div className="font-bold text-sm text-slate-900">{att.exerciseTitle}</div>
-                            <div className="text-[11px] text-slate-400">{att.submittedAt}</div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`text-xs font-bold px-2.5 py-1 rounded-xl border ${cellStyle(att.pct)}`}
-                            >
-                              {att.score.toFixed(2)} / {att.maxScore} ({att.pct}%)
-                            </span>
-                          </div>
-                        </div>
-                        {Object.keys(att.answers).length > 0 && (
-                          <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-200/70">
-                            {Object.entries(att.answers).map(([qKey, ans]) => (
-                              <span
-                                key={qKey}
-                                className="text-[11px] bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-slate-700 font-mono"
-                              >
-                                <strong className="text-indigo-600">{qKey}:</strong> {ans || "(vide)"}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+            {/* Exercise picker pills (compact) */}
+            {attemptedExercises.length === 0 ? (
+              <div className="bg-slate-50 rounded-2xl p-6 text-center text-xs text-slate-500">
+                Aucune copie soumise pour le moment dans cette classe.
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center">
+                  <select
+                    value={selectedExercise}
+                    onChange={(e) => {
+                      setSelectedExercise(e.target.value);
+                      setOpenAttemptId(null);
+                      setGradeNotice(null);
+                    }}
+                    className="flex-1 border border-indigo-200 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-900 bg-indigo-50/40 outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— Choisis l&apos;exercice dont tu veux voir la correction —</option>
+                    {attemptedExercises.map((title) => (
+                      <option key={title} value={title}>
+                        {title}
+                      </option>
                     ))}
+                  </select>
+                  {selectedExercise && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedExercise("");
+                        setOpenAttemptId(null);
+                      }}
+                      className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-3 py-2 rounded-xl border border-slate-200"
+                    >
+                      Réinitialiser
+                    </button>
+                  )}
+                </div>
+
+                {gradeNotice && (
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-xs font-semibold border ${
+                      gradeNotice.ok
+                        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                        : "bg-rose-50 border-rose-200 text-rose-700"
+                    }`}
+                  >
+                    {gradeNotice.text}
                   </div>
                 )}
-              </div>
-            </div>
-          )}
+
+                {!selectedExercise ? (
+                  <div className="bg-slate-50 rounded-2xl p-6 text-center text-xs text-slate-500">
+                    👆 Sélectionne un exercice dans le menu ci-dessus (ou clique sur une note dans la heatmap) pour afficher uniquement sa correction sans encombrer la page.
+                  </div>
+                ) : chosenCorrectionRows.length === 0 ? (
+                  <div className="bg-slate-50 rounded-2xl p-6 text-center text-xs text-slate-500">
+                    Aucune tentative trouvée pour « {selectedExercise} » avec ce filtre élève.
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+                    {chosenCorrectionRows.map(({ studentId, studentName, attempt }) => {
+                      const isOpen = openAttemptId === attempt.id;
+                      return (
+                        <div
+                          key={attempt.id}
+                          className={`rounded-2xl border transition-all ${
+                            isOpen
+                              ? "border-indigo-300 bg-indigo-50/30"
+                              : "border-slate-200 bg-slate-50/60"
+                          }`}
+                        >
+                          {/* Compact summary row */}
+                          <div className="p-4 flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div className="font-bold text-sm text-slate-900">
+                                {studentName} · <span className="text-indigo-700">{attempt.exerciseTitle}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                Soumis le {attempt.submittedAt}
+                                {attempt.feedbackSummary && (
+                                  <span className="ml-2 text-slate-600">· {attempt.feedbackSummary}</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2.5">
+                              <span
+                                className={`text-xs font-extrabold px-3 py-1 rounded-xl border ${cellStyle(attempt.pct)}`}
+                              >
+                                {attempt.score.toFixed(2)} / {attempt.maxScore} ({attempt.pct}%)
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => openEditorForAttempt(attempt)}
+                                className="text-xs font-bold bg-indigo-600 text-white px-3.5 py-1.5 rounded-xl hover:bg-indigo-700 transition-colors"
+                              >
+                                {isOpen ? "Fermer" : "✏️ Voir copie & noter"}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Expanded student answers + Manual Grade Override */}
+                          {isOpen && (
+                            <div className="px-4 pb-4 pt-3 border-t border-indigo-100 space-y-4 bg-white rounded-b-2xl">
+                              <div>
+                                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                                  Réponses envoyées par {studentName}
+                                </div>
+                                {Object.keys(attempt.answers).length === 0 ? (
+                                  <p className="text-xs text-slate-400 italic">
+                                    Aucune réponse saisie dans cette tentative.
+                                  </p>
+                                ) : (
+                                  <div className="space-y-1.5">
+                                    {Object.entries(attempt.answers).map(([qKey, ans]) => (
+                                      <div
+                                        key={qKey}
+                                        className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-800 flex gap-2"
+                                      >
+                                        <span className="font-mono font-bold text-indigo-600 uppercase shrink-0">
+                                          {qKey} :
+                                        </span>
+                                        <span className="font-mono break-words">
+                                          {ans || "(vide)"}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Manual Grade Override Form */}
+                              <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 space-y-3">
+                                <div className="text-xs font-extrabold text-amber-900">
+                                  ✏️ Modifier la note manuellement (Professeur)
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3">
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="number"
+                                      step="0.25"
+                                      min={0}
+                                      max={attempt.maxScore}
+                                      value={draftScore}
+                                      onChange={(e) => setDraftScore(e.target.value)}
+                                      className="w-24 border border-amber-300 rounded-xl px-3 py-2 text-sm font-extrabold text-slate-900 bg-white outline-none focus:border-indigo-500 text-center"
+                                    />
+                                    <span className="text-sm font-bold text-slate-600">
+                                      / {attempt.maxScore}
+                                    </span>
+                                  </div>
+                                  <div className="flex gap-1.5">
+                                    {[
+                                      { label: "0%", val: 0 },
+                                      { label: "50%", val: Number((attempt.maxScore * 0.5).toFixed(2)) },
+                                      { label: "75%", val: Number((attempt.maxScore * 0.75).toFixed(2)) },
+                                      { label: "100%", val: attempt.maxScore },
+                                    ].map((preset) => (
+                                      <button
+                                        key={preset.label}
+                                        type="button"
+                                        onClick={() => setDraftScore(String(preset.val))}
+                                        className="text-[11px] font-bold bg-white border border-amber-200 text-amber-900 hover:bg-amber-100 px-2.5 py-1.5 rounded-lg"
+                                      >
+                                        {preset.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                    Commentaire du professeur (visible dans le suivi)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={draftComment}
+                                    onChange={(e) => setDraftComment(e.target.value)}
+                                    placeholder="ex : Bonne démarche sur Q1 et Q2, points accordés manuellement."
+                                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 bg-white outline-none focus:border-indigo-400"
+                                  />
+                                </div>
+
+                                <div className="flex justify-end">
+                                  <button
+                                    type="button"
+                                    disabled={savingGrade}
+                                    onClick={() => handleSaveGrade(studentId, attempt)}
+                                    className="bg-emerald-600 text-white text-xs font-bold px-5 py-2.5 rounded-xl hover:bg-emerald-700 disabled:opacity-60 shadow-sm"
+                                  >
+                                    {savingGrade ? "⏳ Enregistrement…" : "💾 Enregistrer la nouvelle note"}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </>
       )}
     </TeacherShell>
