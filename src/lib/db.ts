@@ -280,7 +280,9 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
         .order("created_at", { ascending: false }),
     ]);
 
-    assignments = (asgRows || []).map((a: Record<string, unknown>) => {
+    assignments = (asgRows || [])
+      .filter((a: Record<string, unknown>) => a.is_visible !== false)
+      .map((a: Record<string, unknown>) => {
       const versionIds = Array.isArray(a.exercise_version_ids)
         ? (a.exercise_version_ids as string[])
         : [];
@@ -685,6 +687,7 @@ export async function fetchAssignmentPolicyAndAttempt(
   mode: "Noté" | "Entraînement";
   allowRetry: boolean;
   allowHints: boolean;
+  isVisible: boolean;
   timeLimitMinutes: number | null;
   previousAttempt?: {
     answers: Record<string, string>;
@@ -707,6 +710,7 @@ export async function fetchAssignmentPolicyAndAttempt(
   const isGraded = asg.mode === "graded";
   const allowRetry = typeof asg.allow_retry === "boolean" ? asg.allow_retry : !isGraded;
   const allowHints = typeof asg.allow_hints === "boolean" ? asg.allow_hints : !isGraded;
+  const isVisible = typeof asg.is_visible === "boolean" ? asg.is_visible : true;
   const timeLimitMinutes =
     typeof asg.time_limit_minutes === "number" && asg.time_limit_minutes > 0
       ? asg.time_limit_minutes
@@ -747,6 +751,7 @@ export async function fetchAssignmentPolicyAndAttempt(
     mode: isGraded ? "Noté" : "Entraînement",
     allowRetry,
     allowHints,
+    isVisible,
     timeLimitMinutes,
     previousAttempt,
   };

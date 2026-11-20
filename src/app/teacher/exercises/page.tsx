@@ -13,6 +13,7 @@ export default function TeacherExercisesPage() {
     addAssignment,
     toggleAssignmentRetry,
     toggleAssignmentHints,
+    toggleAssignmentVisibility,
     updateAssignmentTimeLimit,
   } = useTeacherStore();
 
@@ -31,6 +32,7 @@ export default function TeacherExercisesPage() {
   const [assignMode, setAssignMode] = useState<"Entraînement" | "Noté">("Entraînement");
   const [assignAllowRetry, setAssignAllowRetry] = useState<boolean>(true);
   const [assignAllowHints, setAssignAllowHints] = useState<boolean>(true);
+  const [assignIsVisible, setAssignIsVisible] = useState<boolean>(true);
   const [assignTimeLimit, setAssignTimeLimit] = useState<string>("");
   const [toast, setToast] = useState<string | null>(null);
 
@@ -70,6 +72,7 @@ export default function TeacherExercisesPage() {
       mode: assignMode,
       allowRetry: assignAllowRetry,
       allowHints: assignAllowHints,
+      isVisible: assignIsVisible,
       timeLimitMinutes:
         Number.isFinite(parsedMinutes) && parsedMinutes > 0 ? parsedMinutes : null,
     });
@@ -243,13 +246,29 @@ export default function TeacherExercisesPage() {
               return (
                 <div
                   key={asg.id}
-                  className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  className={`rounded-2xl border p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                    asg.isVisible
+                      ? "bg-white border-slate-100"
+                      : "bg-slate-50/80 border-dashed border-slate-300 opacity-85"
+                  }`}
                 >
                   <div>
                     <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                       <span className="text-xs font-bold bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-lg">
                         {cls?.name || "Classe"}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleAssignmentVisibility(asg.id)}
+                        title="Cliquer pour afficher ou masquer ce devoir aux élèves"
+                        className={`text-xs font-bold px-2.5 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                          asg.isVisible
+                            ? "bg-emerald-100 text-emerald-800 hover:bg-rose-100 hover:text-rose-800"
+                            : "bg-slate-200 text-slate-700 hover:bg-emerald-100 hover:text-emerald-800"
+                        }`}
+                      >
+                        {asg.isVisible ? "👁️ Visible aux élèves" : "🙈 Masqué aux élèves"}
+                      </button>
                       <span
                         className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg ${
                           asg.mode === "Noté"
@@ -493,6 +512,26 @@ export default function TeacherExercisesPage() {
                     : "L'élève dispose d'un temps illimité."}
                 </div>
               </div>
+
+              {/* Teacher visibility control */}
+              <label className="flex items-start gap-3 cursor-pointer bg-slate-50 border border-slate-200 rounded-2xl p-3.5">
+                <input
+                  type="checkbox"
+                  checked={assignIsVisible}
+                  onChange={(e) => setAssignIsVisible(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0"
+                />
+                <div>
+                  <div className="text-xs font-bold text-slate-900">
+                    👁️ Rendre visible aux élèves immédiatement
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {assignIsVisible
+                      ? "Les élèves de la classe verront immédiatement ce devoir dans leur espace."
+                      : "Préparé en mode masqué : aucun élève ne pourra le voir ni l'ouvrir tant que tu ne l'actives pas."}
+                  </div>
+                </div>
+              </label>
 
               <div className="flex gap-3 pt-2">
                 <button

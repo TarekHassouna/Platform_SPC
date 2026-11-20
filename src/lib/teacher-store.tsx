@@ -74,6 +74,7 @@ export interface AssignmentItem {
   mode: "Entraînement" | "Noté";
   allowRetry: boolean;
   allowHints: boolean;
+  isVisible: boolean;
   timeLimitMinutes: number | null;
   completedCount: number;
   totalStudents: number;
@@ -114,6 +115,7 @@ interface TeacherStoreContextType {
   addAssignment: (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">) => Promise<void>;
   toggleAssignmentRetry: (assignmentId: string) => Promise<void>;
   toggleAssignmentHints: (assignmentId: string) => Promise<void>;
+  toggleAssignmentVisibility: (assignmentId: string) => Promise<void>;
   updateAssignmentTimeLimit: (assignmentId: string, minutes: number | null) => Promise<void>;
   copies: CopySubmission[];
   updateCopy: (copyId: string, updates: Partial<CopySubmission>) => void;
@@ -486,6 +488,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
             typeof a.allow_retry === "boolean" ? a.allow_retry : !isGraded;
           const allowHints =
             typeof a.allow_hints === "boolean" ? a.allow_hints : !isGraded;
+          const isVisible = typeof a.is_visible === "boolean" ? a.is_visible : true;
           const timeLimitMinutes =
             typeof a.time_limit_minutes === "number" && a.time_limit_minutes > 0
               ? a.time_limit_minutes
@@ -502,6 +505,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
             mode: isGraded ? "Noté" : "Entraînement",
             allowRetry,
             allowHints,
+            isVisible,
             timeLimitMinutes,
             completedCount: realDone,
             totalStudents: cls?.students.length || 0,
@@ -720,6 +724,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           ...basePayload,
           allow_retry: asg.allowRetry,
           allow_hints: asg.allowHints,
+          is_visible: asg.isVisible,
           time_limit_minutes: asg.timeLimitMinutes ?? null,
         })
         .select("id")
@@ -730,6 +735,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
       } else if (
         firstTry.error?.message?.includes("allow_retry") ||
         firstTry.error?.message?.includes("allow_hints") ||
+        firstTry.error?.message?.includes("is_visible") ||
         firstTry.error?.message?.includes("time_limit_minutes")
       ) {
         const secondTry = await supabase
@@ -797,6 +803,23 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const toggleAssignmentVisibility = async (assignmentId: string) => {
+    const target = assignments.find((a) => a.id === assignmentId);
+    if (!target) return;
+    const nextVal = !target.isVisible;
+    setAssignments((prev) =>
+      prev.map((a) => (a.id === assignmentId ? { ...a, isVisible: nextVal } : a))
+    );
+    const supabase = getSupabaseBrowserClient();
+    if (isSupabaseConfigured && supabase && user?.id) {
+      await supabase
+        .from("assignments")
+        .update({ is_visible: nextVal })
+        .eq("id", assignmentId)
+        .eq("teacher_id", user.id);
+    }
+  };
+
   const updateAssignmentTimeLimit = async (assignmentId: string, minutes: number | null) => {
     const clean = minutes && minutes > 0 ? Math.round(minutes) : null;
     setAssignments((prev) =>
@@ -833,6 +856,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         addAssignment,
         toggleAssignmentRetry,
         toggleAssignmentHints,
+        toggleAssignmentVisibility,
         updateAssignmentTimeLimit,
         copies,
         updateCopy,

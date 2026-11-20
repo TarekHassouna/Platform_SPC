@@ -77,6 +77,7 @@ function ExerciseRunnerContent() {
   // Teacher-controlled policies for assignments
   const [allowRetry, setAllowRetry] = useState(true);
   const [allowHints, setAllowHints] = useState(true);
+  const [hiddenByTeacher, setHiddenByTeacher] = useState(false);
   const [timeLimitMinutes, setTimeLimitMinutes] = useState<number | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [timeExpired, setTimeExpired] = useState(false);
@@ -212,6 +213,11 @@ function ExerciseRunnerContent() {
     let active = true;
     fetchAssignmentPolicyAndAttempt(assignmentId, user?.id).then((policy) => {
       if (!active || !policy) return;
+      if (!policy.isVisible) {
+        setHiddenByTeacher(true);
+        return;
+      }
+      setHiddenByTeacher(false);
       setAllowRetry(policy.allowRetry);
       setAllowHints(policy.allowHints);
       setTimeLimitMinutes(policy.timeLimitMinutes);
@@ -328,7 +334,14 @@ function ExerciseRunnerContent() {
 
   // Countdown timer effect for timed quizzes/exams: auto-closes and saves student work at 00:00
   useEffect(() => {
-    if (!timeLimitMinutes || timeLimitMinutes <= 0 || submitted || !activeExercise || !timerKey) {
+    if (
+      !timeLimitMinutes ||
+      timeLimitMinutes <= 0 ||
+      submitted ||
+      hiddenByTeacher ||
+      !activeExercise ||
+      !timerKey
+    ) {
       return;
     }
 
@@ -359,7 +372,7 @@ function ExerciseRunnerContent() {
     tick();
     const interval = window.setInterval(tick, 1000);
     return () => window.clearInterval(interval);
-  }, [timeLimitMinutes, submitted, activeExercise, timerKey, submitAnswers]);
+  }, [timeLimitMinutes, submitted, hiddenByTeacher, activeExercise, timerKey, submitAnswers]);
 
   const handleToggleHint = async (q: NormalizedQuestion) => {
     if (!allowHints || !activeExercise) return;
@@ -468,6 +481,26 @@ function ExerciseRunnerContent() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-500">
         Chargement de l&apos;exercice depuis Supabase…
+      </div>
+    );
+  }
+
+  if (hiddenByTeacher) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="bg-white rounded-3xl border border-slate-100 p-8 max-w-md w-full text-center shadow-sm">
+          <div className="text-4xl mb-3">🙈</div>
+          <h1 className="text-lg font-extrabold text-slate-900 mb-2">Devoir masqué par ton professeur</h1>
+          <p className="text-sm text-slate-500 mb-6">
+            Ce devoir n&apos;est pas encore ouvert ou a été fermé par ton enseignant. Reviens dès qu&apos;il le rendra visible.
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-block bg-indigo-600 text-white font-bold text-sm px-6 py-3 rounded-xl hover:bg-indigo-700"
+          >
+            ← Retour au tableau de bord
+          </Link>
+        </div>
       </div>
     );
   }
