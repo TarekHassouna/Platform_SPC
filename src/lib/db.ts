@@ -49,6 +49,7 @@ export interface ClassAssignmentRow {
   className: string;
   mode: string;
   allowRetry: boolean;
+  allowHints: boolean;
   dueAt: string | null;
   targetExerciseId?: string;
 }
@@ -66,6 +67,7 @@ export interface DatabaseExerciseRecord {
     prompt: string;
     type: string;
     expected: string;
+    hint?: string;
     misconception?: string;
   }[];
 }
@@ -298,6 +300,7 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
 
       const isGraded = a.mode === "graded";
       const allowRetry = typeof a.allow_retry === "boolean" ? a.allow_retry : !isGraded;
+      const allowHints = typeof a.allow_hints === "boolean" ? a.allow_hints : !isGraded;
 
       return {
         id: String(a.id),
@@ -305,6 +308,7 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
         className: enrolledClasses.find((c) => c.id === a.class_id)?.name || "Classe",
         mode: isGraded ? "Noté" : "Entraînement",
         allowRetry,
+        allowHints,
         dueAt: a.due_at ? String(a.due_at) : null,
         targetExerciseId,
       };
@@ -674,6 +678,7 @@ export async function fetchAssignmentPolicyAndAttempt(
   title: string;
   mode: "Noté" | "Entraînement";
   allowRetry: boolean;
+  allowHints: boolean;
   previousAttempt?: {
     answers: Record<string, string>;
     score: number;
@@ -694,6 +699,7 @@ export async function fetchAssignmentPolicyAndAttempt(
   if (!asg) return null;
   const isGraded = asg.mode === "graded";
   const allowRetry = typeof asg.allow_retry === "boolean" ? asg.allow_retry : !isGraded;
+  const allowHints = typeof asg.allow_hints === "boolean" ? asg.allow_hints : !isGraded;
 
   let previousAttempt: {
     answers: Record<string, string>;
@@ -729,6 +735,7 @@ export async function fetchAssignmentPolicyAndAttempt(
     title: String(asg.title),
     mode: isGraded ? "Noté" : "Entraînement",
     allowRetry,
+    allowHints,
     previousAttempt,
   };
 }

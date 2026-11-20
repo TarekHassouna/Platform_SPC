@@ -13,7 +13,7 @@ interface DraftExercise {
   skills: string[];
   statement: string;
   params: { name: string; range: string; unit: string }[];
-  questions: { prompt: string; type: string; expected: string; misconception: string }[];
+  questions: { prompt: string; type: string; expected: string; hint?: string; misconception: string }[];
   verificationChecks: string[];
 }
 
@@ -214,6 +214,8 @@ export default function TeacherCreateExercisePage() {
         prompt: q.prompt,
         type: q.type,
         expected: q.expected,
+        hint: q.hint,
+        misconception: q.misconception,
       })),
     });
     setPublishedBanner(true);
@@ -403,6 +405,22 @@ export default function TeacherCreateExercisePage() {
                       </div>
                       <div className="text-xs text-emerald-700 font-mono mb-1">
                         ✓ Attendu : {q.expected}
+                      </div>
+                      <div className="mt-2 mb-1.5">
+                        <label className="block text-[11px] font-semibold text-indigo-700 mb-1">
+                          💡 Indice élève (modifiable)
+                        </label>
+                        <input
+                          type="text"
+                          value={q.hint || ""}
+                          onChange={(e) => {
+                            const updated = [...draft.questions];
+                            updated[idx] = { ...updated[idx], hint: e.target.value };
+                            setDraft({ ...draft, questions: updated });
+                          }}
+                          placeholder="Indice pédagogique guidant la méthode sans donner la réponse…"
+                          className="w-full border border-indigo-100 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 bg-white outline-none focus:border-indigo-400"
+                        />
                       </div>
                       <div className="text-xs text-rose-600">
                         ⚠️ Erreur surveillée : {q.misconception}

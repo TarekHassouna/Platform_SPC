@@ -6,6 +6,17 @@ import { CURRICULUM_EXERCISES } from "@/lib/curriculum-bank";
 
 export type Level = "Seconde" | "Première" | "Terminale";
 
+export interface StudentAttemptRecord {
+  id: string;
+  exerciseTitle: string;
+  score: number;
+  maxScore: number;
+  pct: number;
+  status: string;
+  submittedAt: string;
+  answers: Record<string, string>;
+}
+
 export interface StudentRecord {
   id: string;
   name: string;
@@ -16,6 +27,7 @@ export interface StudentRecord {
   lastActive: string;
   status: "top" | "active" | "struggling";
   skills: Record<string, number>;
+  recentAttempts: StudentAttemptRecord[];
 }
 
 export interface ClassAlert {
@@ -50,7 +62,7 @@ export interface ExerciseItem {
   version: string;
   skills: string[];
   statement: string;
-  questions: { prompt: string; type: string; expected: string }[];
+  questions: { prompt: string; type: string; expected: string; hint?: string; misconception?: string }[];
 }
 
 export interface AssignmentItem {
@@ -61,6 +73,7 @@ export interface AssignmentItem {
   dueDate: string;
   mode: "Entraînement" | "Noté";
   allowRetry: boolean;
+  allowHints: boolean;
   completedCount: number;
   totalStudents: number;
 }
@@ -99,6 +112,7 @@ interface TeacherStoreContextType {
   assignments: AssignmentItem[];
   addAssignment: (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">) => Promise<void>;
   toggleAssignmentRetry: (assignmentId: string) => Promise<void>;
+  toggleAssignmentHints: (assignmentId: string) => Promise<void>;
   copies: CopySubmission[];
   updateCopy: (copyId: string, updates: Partial<CopySubmission>) => void;
 }
@@ -199,8 +213,15 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
       let masteryByStudent = new Map<string, Record<string, number>>();
       let subsByStudent = new Map<
         string,
-        { count: number; avgPct: number; lastDate: string | null }
+        {
+          count: number;
+          avgPct: number;
+          lastDate: string | null;
+          exerciseSkills: Record<string, number>;
+          recentAttempts: StudentAttemptRecord[];
+        }
       >();
+      const assignmentCompleters = new Map<string, Set<string>>();
       const realPhotoCopies: CopySubmission[] = [];
 
       if (uniqueStudentIds.length > 0) {
@@ -212,7 +233,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           supabase
             .from("submissions")
             .select(
-              "id, student_id, input_mode, rendered_params, raw_answers, created_at, evaluation_results(score, max_score, status, feedback_summary)"
+              "id, student_id, assignment_id, input_mode, rendered_params, raw_answers, created_at, evaluation_results(score, max_score, status, feedback_summary)"
             )
             .in("student_id", uniqueStudentIds)
             .order("created_at", { ascending: false }),
@@ -227,20 +248,69 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           masteryByStudent.get(sid)![label] = Number(m.mastery_score || 0);
         });
 
-        const accMap = new Map<string, { sumPct: number; count: number; lastDate: string | null }>();
+        const accMap = new Map<
+          string,
+          {
+            sumPct: number;
+            count: number;
+            lastDate: string | null;
+            byExercise: Map<string, { sumPct: number; count: number }>;
+            recentAttempts: StudentAttemptRecord[];
+          }
+        >();
+
         (subRows || []).forEach((s: Record<string, unknown>) => {
           const sid = String(s.student_id);
+          const asgId = s.assignment_id ? String(s.assignment_id) : null;
+          if (asgId) {
+            if (!assignmentCompleters.has(asgId)) assignmentCompleters.set(asgId, new Set());
+            assignmentCompleters.get(asgId)!.add(sid);
+          }
+
           const ev = (Array.isArray(s.evaluation_results)
             ? s.evaluation_results[0]
             : s.evaluation_results) as Record<string, unknown> | null;
           const score = Number(ev?.score ?? 0);
           const maxScore = Number(ev?.max_score ?? 1);
           const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+          const rendered = (s.rendered_params as Record<string, unknown>) || {};
+          const exTitle = String(rendered.exerciseTitle || "Exercice Physique-Chimie");
+          const rawAnswersObj = (s.raw_answers as Record<string, unknown>) || {};
+          const cleanAnswers: Record<string, string> = {};
+          Object.entries(rawAnswersObj).forEach(([k, v]) => {
+            if (typeof v === "string") cleanAnswers[k] = v;
+          });
 
-          if (!accMap.has(sid)) accMap.set(sid, { sumPct: 0, count: 0, lastDate: String(s.created_at) });
+          if (!accMap.has(sid)) {
+            accMap.set(sid, {
+              sumPct: 0,
+              count: 0,
+              lastDate: String(s.created_at),
+              byExercise: new Map(),
+              recentAttempts: [],
+            });
+          }
           const entry = accMap.get(sid)!;
           entry.sumPct += pct;
           entry.count += 1;
+
+          const exStat = entry.byExercise.get(exTitle) || { sumPct: 0, count: 0 };
+          exStat.sumPct += pct;
+          exStat.count += 1;
+          entry.byExercise.set(exTitle, exStat);
+
+          if (entry.recentAttempts.length < 12) {
+            entry.recentAttempts.push({
+              id: String(s.id),
+              exerciseTitle: exTitle,
+              score,
+              maxScore,
+              pct,
+              status: String(ev?.status || "incorrect"),
+              submittedAt: new Date(String(s.created_at)).toLocaleString("fr-FR"),
+              answers: cleanAnswers,
+            });
+          }
 
           if (s.input_mode === "photo") {
             const rawAns = (s.raw_answers as Record<string, unknown>) || {};
@@ -287,10 +357,16 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
 
         subsByStudent = new Map();
         accMap.forEach((v, k) => {
+          const exerciseSkills: Record<string, number> = {};
+          v.byExercise.forEach((stat, title) => {
+            exerciseSkills[title] = Math.round(stat.sumPct / stat.count);
+          });
           subsByStudent.set(k, {
             count: v.count,
             avgPct: v.count > 0 ? Math.round(v.sumPct / v.count) : 0,
             lastDate: v.lastDate,
+            exerciseSkills,
+            recentAttempts: v.recentAttempts,
           });
         });
       }
@@ -301,17 +377,21 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           const lvl = (row.level as Level) || "Terminale";
           const members = (row.class_members as Array<Record<string, unknown>>) || [];
 
-          const discoveredSkills = new Set<string>(DEFAULT_SKILLS_BY_LEVEL[lvl]);
+          const evaluatedSkills = new Set<string>();
           const students: StudentRecord[] = members.map((m) => {
             const sid = String(m.student_id);
             const p = (Array.isArray(m.profiles) ? m.profiles[0] : m.profiles) as Record<
               string,
               string
             > | null;
-            const sSkills = masteryByStudent.get(sid) || {};
-            Object.keys(sSkills).forEach((k) => discoveredSkills.add(k));
-
             const subStats = subsByStudent.get(sid);
+            // Merge official concept mastery + per-exercise scores so custom/AI exercises appear in heatmap!
+            const sSkills: Record<string, number> = {
+              ...(subStats?.exerciseSkills || {}),
+              ...(masteryByStudent.get(sid) || {}),
+            };
+            Object.keys(sSkills).forEach((k) => evaluatedSkills.add(k));
+
             const accuracy = subStats ? subStats.avgPct : 0;
             const exercisesDone = subStats ? subStats.count : 0;
 
@@ -342,8 +422,15 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
                 : "Inscrit récemment",
               status,
               skills: sSkills,
+              recentAttempts: subStats?.recentAttempts || [],
             };
           });
+
+          // Show actually-evaluated skills/exercises FIRST; only append defaults when nothing evaluated yet
+          const orderedSkills =
+            evaluatedSkills.size > 0
+              ? Array.from(evaluatedSkills)
+              : DEFAULT_SKILLS_BY_LEVEL[lvl];
 
           // Generate real alerts ONLY from real student metrics
           const realAlerts: ClassAlert[] = [];
@@ -372,7 +459,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
             level: lvl,
             inviteCode: String(row.invite_code),
             color: String(row.color || CLASS_COLORS[idx % CLASS_COLORS.length]),
-            skills: Array.from(discoveredSkills),
+            skills: orderedSkills,
             alerts: realAlerts,
             students,
           };
@@ -395,6 +482,9 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           const isGraded = a.mode === "graded";
           const allowRetry =
             typeof a.allow_retry === "boolean" ? a.allow_retry : !isGraded;
+          const allowHints =
+            typeof a.allow_hints === "boolean" ? a.allow_hints : !isGraded;
+          const realDone = assignmentCompleters.get(String(a.id))?.size || 0;
           return {
             id: String(a.id),
             title: String(a.title),
@@ -405,7 +495,8 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
               : "Sans date limite",
             mode: isGraded ? "Noté" : "Entraînement",
             allowRetry,
-            completedCount: 0,
+            allowHints,
+            completedCount: realDone,
             totalStudents: cls?.students.length || 0,
           };
         })
@@ -517,6 +608,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           lastActive: "Code à utiliser : " + cls.inviteCode,
           status: "active",
           skills: {},
+          recentAttempts: [],
         };
         return { ...cls, students: [...cls.students, newStudent] };
       })
@@ -617,19 +709,31 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
       };
       const firstTry = await supabase
         .from("assignments")
-        .insert({ ...basePayload, allow_retry: asg.allowRetry })
+        .insert({ ...basePayload, allow_retry: asg.allowRetry, allow_hints: asg.allowHints })
         .select("id")
         .single();
 
       if (firstTry.data?.id) {
         newId = firstTry.data.id;
-      } else if (firstTry.error?.message?.includes("allow_retry")) {
-        const retryInsert = await supabase
+      } else if (
+        firstTry.error?.message?.includes("allow_retry") ||
+        firstTry.error?.message?.includes("allow_hints")
+      ) {
+        const secondTry = await supabase
           .from("assignments")
-          .insert(basePayload)
+          .insert({ ...basePayload, allow_retry: asg.allowRetry })
           .select("id")
           .single();
-        if (retryInsert.data?.id) newId = retryInsert.data.id;
+        if (secondTry.data?.id) {
+          newId = secondTry.data.id;
+        } else {
+          const retryInsert = await supabase
+            .from("assignments")
+            .insert(basePayload)
+            .select("id")
+            .single();
+          if (retryInsert.data?.id) newId = retryInsert.data.id;
+        }
       }
     }
 
@@ -659,6 +763,23 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const toggleAssignmentHints = async (assignmentId: string) => {
+    const target = assignments.find((a) => a.id === assignmentId);
+    if (!target) return;
+    const nextVal = !target.allowHints;
+    setAssignments((prev) =>
+      prev.map((a) => (a.id === assignmentId ? { ...a, allowHints: nextVal } : a))
+    );
+    const supabase = getSupabaseBrowserClient();
+    if (isSupabaseConfigured && supabase && user?.id) {
+      await supabase
+        .from("assignments")
+        .update({ allow_hints: nextVal })
+        .eq("id", assignmentId)
+        .eq("teacher_id", user.id);
+    }
+  };
+
   const updateCopy = (copyId: string, updates: Partial<CopySubmission>) => {
     setCopies((prev) => prev.map((c) => (c.id === copyId ? { ...c, ...updates } : c)));
   };
@@ -679,6 +800,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         assignments,
         addAssignment,
         toggleAssignmentRetry,
+        toggleAssignmentHints,
         copies,
         updateCopy,
       }}

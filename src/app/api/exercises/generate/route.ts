@@ -26,8 +26,9 @@ export async function POST(req: NextRequest) {
 
   const system =
     "Tu es un professeur agrégé de Physique-Chimie qui conçoit des modèles d'exercices paramétrés pour le lycée français. " +
+    "Pour chaque question, rédige aussi un vrai 'hint' (indice pédagogique de 1 à 2 phrases qui guide l'élève sur la méthode ou la loi à utiliser SANS donner la réponse finale). " +
     "Retourne UNIQUEMENT un JSON valide avec cette structure exacte : " +
-    '{"title":"...","domain":"Électricité|Mécanique|Chimie|Métrologie","chapter":"...","skills":["..."],"statement":"...avec {param}...","params":[{"name":"...","range":"...","unit":"..."}],"questions":[{"prompt":"...","type":"Expression|Grandeur|Texte libre","expected":"...","misconception":"..."}],"verificationChecks":["..."]}';
+    '{"title":"...","domain":"Électricité|Mécanique|Chimie|Métrologie","chapter":"...","skills":["..."],"statement":"...avec {param}...","params":[{"name":"...","range":"...","unit":"..."}],"questions":[{"prompt":"...","type":"Expression|Grandeur|Texte libre","expected":"...","hint":"...","misconception":"..."}],"verificationChecks":["..."]}';
 
   try {
     const aiRes = await callTextAI({
@@ -38,7 +39,8 @@ export async function POST(req: NextRequest) {
           content: `Niveau : ${payload.level}. Style : ${payload.difficulty}. Demande enseignant : ${payload.prompt}`,
         },
       ],
-      maxTokens: 900,
+      maxTokens: 1500,
+      jsonMode: true,
     });
 
     if (aiRes?.text) {

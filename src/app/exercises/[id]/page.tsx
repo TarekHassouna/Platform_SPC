@@ -74,8 +74,9 @@ function ExerciseRunnerContent() {
   const [loadingDb, setLoadingDb] = useState(!officialTemplate);
   const [notFound, setNotFound] = useState(false);
 
-  // Teacher-controlled retry policy for assignments
+  // Teacher-controlled policies for assignments
   const [allowRetry, setAllowRetry] = useState(true);
+  const [allowHints, setAllowHints] = useState(true);
   const [lockedAttemptInfo, setLockedAttemptInfo] = useState<{
     score: number;
     maxScore: number;
@@ -150,9 +151,7 @@ function ExerciseRunnerContent() {
                 ? "Écris ton expression littérale…"
                 : "Écris la valeur suivie de son unité…",
             expected: q.expected,
-            hint: q.misconception
-              ? `Point d'attention : ${q.misconception}`
-              : "Relis bien les données et les unités de l'énoncé.",
+            hint: q.hint?.trim() || "",
           };
         }),
         isRandomizable: false,
@@ -166,6 +165,8 @@ function ExerciseRunnerContent() {
   const [activeInputId, setActiveInputId] = useState<string>("q1");
   const [feedback, setFeedback] = useState<Record<string, EvalResult>>({});
   const [revealedHints, setRevealedHints] = useState<Record<string, boolean>>({});
+  const [dynamicHints, setDynamicHints] = useState<Record<string, string>>({});
+  const [loadingHintId, setLoadingHintId] = useState<string | null>(null);
   const [showLesson, setShowLesson] = useState(false);
   const [showTutor, setShowTutor] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -191,6 +192,7 @@ function ExerciseRunnerContent() {
     fetchAssignmentPolicyAndAttempt(assignmentId, user?.id).then((policy) => {
       if (!active || !policy) return;
       setAllowRetry(policy.allowRetry);
+      setAllowHints(policy.allowHints);
       if (!policy.allowRetry && policy.previousAttempt) {
         setAnswers(policy.previousAttempt.answers);
         setSubmitted(true);
@@ -268,6 +270,43 @@ function ExerciseRunnerContent() {
         errors,
       });
       setSavedToDb(true);
+    }
+  };
+
+  const handleToggleHint = async (q: NormalizedQuestion) => {
+    if (!allowHints || !activeExercise) return;
+    const isOpen = !!revealedHints[q.id];
+    if (isOpen) {
+      setRevealedHints((p) => ({ ...p, [q.id]: false }));
+      return;
+    }
+    setRevealedHints((p) => ({ ...p, [q.id]: true }));
+    if (q.hint || dynamicHints[q.id]) return;
+
+    setLoadingHintId(q.id);
+    try {
+      const res = await fetch("/api/exercises/hint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: activeExercise.title,
+          statement: activeExercise.statement,
+          questionPrompt: q.prompt,
+          expected: q.expected,
+          studentAnswer: answers[q.id] || "",
+        }),
+      });
+      const data = await res.json();
+      if (data.hint) {
+        setDynamicHints((prev) => ({ ...prev, [q.id]: data.hint }));
+      }
+    } catch {
+      setDynamicHints((prev) => ({
+        ...prev,
+        [q.id]: "Repère les grandeurs données dans l'énoncé et la loi du chapitre qui les relie.",
+      }));
+    } finally {
+      setLoadingHintId((curr) => (curr === q.id ? null : curr));
     }
   };
 
@@ -452,6 +491,16 @@ function ExerciseRunnerContent() {
                       Exercice de ton professeur
                     </span>
                   )}
+                  {!allowHints && (
+                    <span className="text-[11px] font-bold bg-rose-50 text-rose-700 px-2.5 py-0.5 rounded-full">
+                      🚫 Indices désactivés par ton professeur
+                    </span>
+                  )}
+                  {!allowRetry && (
+                    <span className="text-[11px] font-bold bg-amber-50 text-amber-800 px-2.5 py-0.5 rounded-full">
+                      🔒 1 seul essai
+                    </span>
+                  )}
                 </div>
               </div>
               {activeExercise.isRandomizable && allowRetry && (
@@ -504,10 +553,10 @@ function ExerciseRunnerContent() {
                         }`}
                       />
                     )}
-                    {!submitted && (
+                    {!submitted && allowHints && (
                       <button
                         type="button"
-                        onClick={() => setRevealedHints((p) => ({ ...p, [q.id]: !p[q.id] }))}
+                        onClick={() => handleToggleHint(q)}
                         className="text-xs font-bold text-slate-500 hover:text-indigo-600 px-3 py-2 whitespace-nowrap"
                       >
                         💡 Indice
@@ -523,9 +572,14 @@ function ExerciseRunnerContent() {
                     />
                   )}
 
-                  {revealedHints[q.id] && !submitted && (
+                  {allowHints && revealedHints[q.id] && !submitted && (
                     <div className="mt-3 bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-2.5 text-xs text-indigo-800">
-                      💡 <strong>Indice :</strong> <MathText text={q.hint} />
+                      💡 <strong>Indice :</strong>{" "}
+                      {loadingHintId === q.id ? (
+                        <span className="italic text-indigo-500">Préparation d&apos;un indice ciblé…</span>
+                      ) : (
+                        <MathText text={q.hint || dynamicHints[q.id] || ""} />
+                      )}
                     </div>
                   )}
 

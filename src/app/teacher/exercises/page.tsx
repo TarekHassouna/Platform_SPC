@@ -5,8 +5,15 @@ import { useTeacherStore, ExerciseItem } from "@/lib/teacher-store";
 import { TeacherShell } from "@/components/TeacherShell";
 
 export default function TeacherExercisesPage() {
-  const { classes, selectedClassId, exercises, assignments, addAssignment, toggleAssignmentRetry } =
-    useTeacherStore();
+  const {
+    classes,
+    selectedClassId,
+    exercises,
+    assignments,
+    addAssignment,
+    toggleAssignmentRetry,
+    toggleAssignmentHints,
+  } = useTeacherStore();
 
   const [tab, setTab] = useState<"library" | "assignments">("library");
   const [levelFilter, setLevelFilter] = useState<string>("all");
@@ -22,6 +29,7 @@ export default function TeacherExercisesPage() {
   const [assignDueDate, setAssignDueDate] = useState("28 nov. 2026");
   const [assignMode, setAssignMode] = useState<"Entraînement" | "Noté">("Entraînement");
   const [assignAllowRetry, setAssignAllowRetry] = useState<boolean>(true);
+  const [assignAllowHints, setAssignAllowHints] = useState<boolean>(true);
   const [toast, setToast] = useState<string | null>(null);
 
   const filteredExercises = exercises.filter((ex) => {
@@ -58,6 +66,7 @@ export default function TeacherExercisesPage() {
       dueDate: assignDueDate,
       mode: assignMode,
       allowRetry: assignAllowRetry,
+      allowHints: assignAllowHints,
     });
     const clsName = classes.find((c) => c.id === targetClassId)?.name || "la classe";
     setAssigningEx(null);
@@ -255,7 +264,19 @@ export default function TeacherExercisesPage() {
                             : "bg-amber-100 text-amber-800 hover:bg-slate-100 hover:text-slate-700"
                         }`}
                       >
-                        {asg.allowRetry ? "🔄 Réessais autorisés (cliquer pour bloquer)" : "🔒 1 seul essai (cliquer pour autoriser)"}
+                        {asg.allowRetry ? "🔄 Réessais autorisés" : "🔒 1 seul essai"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleAssignmentHints(asg.id)}
+                        title="Cliquer pour activer ou désactiver les indices élève"
+                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg transition-colors cursor-pointer ${
+                          asg.allowHints
+                            ? "bg-indigo-50 text-indigo-700 hover:bg-rose-50 hover:text-rose-700"
+                            : "bg-rose-50 text-rose-700 hover:bg-indigo-50 hover:text-indigo-700"
+                        }`}
+                      >
+                        {asg.allowHints ? "💡 Indices autorisés" : "🚫 Sans indices"}
                       </button>
                       <span className="text-xs text-slate-400">Échéance : {asg.dueDate}</span>
                     </div>
@@ -335,6 +356,7 @@ export default function TeacherExercisesPage() {
                       const nextMode = e.target.value as "Entraînement" | "Noté";
                       setAssignMode(nextMode);
                       setAssignAllowRetry(nextMode === "Entraînement");
+                      setAssignAllowHints(nextMode === "Entraînement");
                     }}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 bg-white outline-none focus:border-indigo-400"
                   >
@@ -372,6 +394,26 @@ export default function TeacherExercisesPage() {
                   </div>
                 </div>
               </label>
+              {/* Teacher hints control */}
+              <label className="flex items-start gap-3 cursor-pointer bg-slate-50 border border-slate-200 rounded-2xl p-3.5">
+                <input
+                  type="checkbox"
+                  checked={assignAllowHints}
+                  onChange={(e) => setAssignAllowHints(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0"
+                />
+                <div>
+                  <div className="text-xs font-bold text-slate-900">
+                    Autoriser les indices (💡 Indice)
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {assignAllowHints
+                      ? "L'élève peut demander un indice pédagogique guidé sur chaque question."
+                      : "Mode sans aide : le bouton Indice est masqué pour cet exercice."}
+                  </div>
+                </div>
+              </label>
+
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"

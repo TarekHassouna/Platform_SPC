@@ -115,6 +115,11 @@ export default function ExerciseCatalogPage() {
                       >
                         {a.allowRetry ? "🔄 Réessais autorisés" : "🔒 1 seul essai"}
                       </span>
+                      {!a.allowHints && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700">
+                          🚫 Sans indices
+                        </span>
+                      )}
                     </div>
                     <div className="text-sm font-bold text-slate-900 mt-0.5">{a.title}</div>
                   </div>

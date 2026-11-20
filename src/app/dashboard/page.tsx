@@ -275,6 +275,11 @@ export default function DashboardPage() {
                           >
                             {asg.allowRetry ? "🔄 Réessais autorisés" : "🔒 1 seul essai"}
                           </span>
+                          {!asg.allowHints && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                              🚫 Sans indices
+                            </span>
+                          )}
                         </div>
                         <div className="font-bold text-slate-900">{asg.title}</div>
                       </div>

@@ -184,14 +184,16 @@ export default function TeacherResultsPage() {
 
           {/* Selected student detail card */}
           {selectedStudent && (
-            <div className="bg-white rounded-3xl border border-indigo-200 p-6 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
+            <div className="bg-white rounded-3xl border border-indigo-200 p-6 shadow-sm space-y-6">
+              <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-extrabold text-slate-900">
                     Fiche rapide — {selectedStudent.name}
                   </h3>
                   <p className="text-xs text-slate-500">
-                    {selectedStudent.email} · {selectedStudent.exercisesDone} exercices résolus · Dernière activité : {selectedStudent.lastActive}
+                    {selectedStudent.email} · {selectedStudent.exercisesDone} soumission(s) · Moyenne globale :{" "}
+                    <strong>{selectedStudent.exercisesDone > 0 ? `${selectedStudent.accuracy}%` : "—"}</strong> · Dernière activité :{" "}
+                    {selectedStudent.lastActive}
                   </p>
                 </div>
                 <button
@@ -201,25 +203,85 @@ export default function TeacherResultsPage() {
                   Fermer ×
                 </button>
               </div>
-              <div className="grid sm:grid-cols-3 gap-3">
-                {Object.entries(selectedStudent.skills).map(([sk, val]) => (
-                  <div key={sk} className="bg-slate-50 rounded-2xl p-3.5 border border-slate-100">
-                    <div className="flex justify-between text-xs font-semibold mb-1.5">
-                      <span className="text-slate-700">{sk}</span>
-                      <span className={val < 50 ? "text-rose-600" : val < 75 ? "text-amber-600" : "text-emerald-600"}>
-                        {val}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${
-                          val < 50 ? "bg-rose-500" : val < 75 ? "bg-amber-400" : "bg-emerald-500"
-                        }`}
-                        style={{ width: `${val}%` }}
-                      />
-                    </div>
+
+              {/* Skills / chapters breakdown */}
+              {Object.keys(selectedStudent.skills).length > 0 && (
+                <div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                    Maîtrise par exercice / compétence
                   </div>
-                ))}
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    {Object.entries(selectedStudent.skills).map(([sk, val]) => (
+                      <div key={sk} className="bg-slate-50 rounded-2xl p-3.5 border border-slate-100">
+                        <div className="flex justify-between gap-2 text-xs font-semibold mb-1.5">
+                          <span className="text-slate-700 line-clamp-2">{sk}</span>
+                          <span
+                            className={`shrink-0 ${
+                              val < 50 ? "text-rose-600" : val < 75 ? "text-amber-600" : "text-emerald-600"
+                            }`}
+                          >
+                            {val}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              val < 50 ? "bg-rose-500" : val < 75 ? "bg-amber-400" : "bg-emerald-500"
+                            }`}
+                            style={{ width: `${val}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent real submissions */}
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                  Historique réel des tentatives ({selectedStudent.recentAttempts.length})
+                </div>
+                {selectedStudent.recentAttempts.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic">
+                    Cet élève n&apos;a pas encore soumis d&apos;exercice.
+                  </p>
+                ) : (
+                  <div className="space-y-2.5">
+                    {selectedStudent.recentAttempts.map((att) => (
+                      <div
+                        key={att.id}
+                        className="bg-slate-50 rounded-2xl p-4 border border-slate-100 flex flex-col gap-2"
+                      >
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <div>
+                            <div className="font-bold text-sm text-slate-900">{att.exerciseTitle}</div>
+                            <div className="text-[11px] text-slate-400">{att.submittedAt}</div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`text-xs font-bold px-2.5 py-1 rounded-xl border ${cellStyle(att.pct)}`}
+                            >
+                              {att.score.toFixed(2)} / {att.maxScore} ({att.pct}%)
+                            </span>
+                          </div>
+                        </div>
+                        {Object.keys(att.answers).length > 0 && (
+                          <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-200/70">
+                            {Object.entries(att.answers).map(([qKey, ans]) => (
+                              <span
+                                key={qKey}
+                                className="text-[11px] bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-slate-700 font-mono"
+                              >
+                                <strong className="text-indigo-600">{qKey}:</strong> {ans || "(vide)"}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
