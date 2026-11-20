@@ -1,7 +1,8 @@
 "use client";
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/auth-context";
+import { CURRICULUM_EXERCISES } from "@/lib/curriculum-bank";
 
 export type Level = "Seconde" | "Première" | "Terminale";
 
@@ -14,7 +15,7 @@ export interface StudentRecord {
   weakSkill: string;
   lastActive: string;
   status: "top" | "active" | "struggling";
-  skills: Record<string, number>; // skillName -> 0..100
+  skills: Record<string, number>;
 }
 
 export interface ClassAlert {
@@ -82,292 +83,24 @@ export interface CopySubmission {
   teacherComment: string;
 }
 
-const DEFAULT_CLASSES: TeacherClass[] = [
-  {
-    id: "cls-term-1",
-    name: "Terminale Spé 1",
-    level: "Terminale",
-    inviteCode: "PHY-2026-TS1",
-    color: "from-indigo-500 to-violet-600",
-    skills: ["Loi d'Ohm", "Conversion d'unités", "Lois de Newton", "Chute libre", "Acido-basicité", "Chiffres significatifs"],
-    alerts: [
-      { id: "a1", text: "68% de la classe a des difficultés sur la conversion d'unités (mA ↔ A)", action: "Envoyer remédiation", severity: "high" },
-      { id: "a2", text: "Lina M. n'a pas pratiqué depuis 5 jours", action: "Envoyer un rappel", severity: "medium" },
-      { id: "a3", text: "2 copies manuscrites pré-corrigées à valider", action: "Valider les copies", severity: "info" },
-    ],
-    students: [
-      {
-        id: "s1", name: "Amira Benali", email: "amira.b@lycee.fr", accuracy: 74, exercisesDone: 28,
-        weakSkill: "Conversion d'unités", lastActive: "Il y a 2h", status: "active",
-        skills: { "Loi d'Ohm": 92, "Conversion d'unités": 34, "Lois de Newton": 86, "Chute libre": 62, "Acido-basicité": 70, "Chiffres significatifs": 68 },
-      },
-      {
-        id: "s2", name: "Karim Saidi", email: "karim.s@lycee.fr", accuracy: 88, exercisesDone: 35,
-        weakSkill: "Chute libre", lastActive: "Il y a 4h", status: "top",
-        skills: { "Loi d'Ohm": 95, "Conversion d'unités": 82, "Lois de Newton": 91, "Chute libre": 58, "Acido-basicité": 89, "Chiffres significatifs": 85 },
-      },
-      {
-        id: "s3", name: "Lina Mansour", email: "lina.m@lycee.fr", accuracy: 45, exercisesDone: 11,
-        weakSkill: "Conversion d'unités", lastActive: "Il y a 5j", status: "struggling",
-        skills: { "Loi d'Ohm": 60, "Conversion d'unités": 25, "Lois de Newton": 48, "Chute libre": 35, "Acido-basicité": 42, "Chiffres significatifs": 38 },
-      },
-      {
-        id: "s4", name: "Sara Toumi", email: "sara.t@lycee.fr", accuracy: 93, exercisesDone: 41,
-        weakSkill: "Aucune lacune majeure", lastActive: "Il y a 1h", status: "top",
-        skills: { "Loi d'Ohm": 98, "Conversion d'unités": 90, "Lois de Newton": 94, "Chute libre": 88, "Acido-basicité": 92, "Chiffres significatifs": 95 },
-      },
-      {
-        id: "s5", name: "Mehdi Haddad", email: "mehdi.h@lycee.fr", accuracy: 56, exercisesDone: 19,
-        weakSkill: "Chute libre", lastActive: "Hier", status: "struggling",
-        skills: { "Loi d'Ohm": 74, "Conversion d'unités": 40, "Lois de Newton": 61, "Chute libre": 32, "Acido-basicité": 58, "Chiffres significatifs": 50 },
-      },
-    ],
-  },
-  {
-    id: "cls-prem-2",
-    name: "Première Spé B",
-    level: "Première",
-    inviteCode: "PHY-2026-P1B",
-    color: "from-emerald-500 to-teal-600",
-    skills: ["Tableau d'avancement", "Oxydoréduction", "Quantité de matière", "Forces & vecteurs", "Énergie cinétique"],
-    alerts: [
-      { id: "b1", text: "55% de la classe confond réactif limitant et stœchiométrie", action: "Envoyer remédiation", severity: "high" },
-      { id: "b2", text: "1 copie de contrôle de chimie à vérifier", action: "Valider les copies", severity: "info" },
-    ],
-    students: [
-      {
-        id: "s6", name: "Omar Diallo", email: "omar.d@lycee.fr", accuracy: 67, exercisesDone: 22,
-        weakSkill: "Tableau d'avancement", lastActive: "Il y a 3h", status: "active",
-        skills: { "Tableau d'avancement": 48, "Oxydoréduction": 64, "Quantité de matière": 79, "Forces & vecteurs": 72, "Énergie cinétique": 70 },
-      },
-      {
-        id: "s7", name: "Chloé Laurent", email: "chloe.l@lycee.fr", accuracy: 85, exercisesDone: 31,
-        weakSkill: "Oxydoréduction", lastActive: "Aujourd'hui", status: "top",
-        skills: { "Tableau d'avancement": 88, "Oxydoréduction": 66, "Quantité de matière": 92, "Forces & vecteurs": 85, "Énergie cinétique": 90 },
-      },
-      {
-        id: "s8", name: "Nassim Khelifi", email: "nassim.k@lycee.fr", accuracy: 42, exercisesDone: 9,
-        weakSkill: "Quantité de matière", lastActive: "Il y a 3j", status: "struggling",
-        skills: { "Tableau d'avancement": 38, "Oxydoréduction": 35, "Quantité de matière": 30, "Forces & vecteurs": 52, "Énergie cinétique": 49 },
-      },
-      {
-        id: "s9", name: "Inès Moreau", email: "ines.m@lycee.fr", accuracy: 76, exercisesDone: 24,
-        weakSkill: "Tableau d'avancement", lastActive: "Hier", status: "active",
-        skills: { "Tableau d'avancement": 55, "Oxydoréduction": 78, "Quantité de matière": 84, "Forces & vecteurs": 80, "Énergie cinétique": 81 },
-      },
-    ],
-  },
-  {
-    id: "cls-sec-3",
-    name: "Seconde 3",
-    level: "Seconde",
-    inviteCode: "PHY-2026-2DE3",
-    color: "from-orange-500 to-amber-500",
-    skills: ["Loi d'Ohm", "Masse volumique", "Notation scientifique", "Concentration massique", "Réfraction"],
-    alerts: [
-      { id: "c1", text: "La notation scientifique reste fragile chez 3 élèves", action: "Envoyer remédiation", severity: "medium" },
-    ],
-    students: [
-      {
-        id: "s10", name: "Yassine Amrani", email: "yassine.a@lycee.fr", accuracy: 41, exercisesDone: 12,
-        weakSkill: "Notation scientifique", lastActive: "Hier", status: "struggling",
-        skills: { "Loi d'Ohm": 48, "Masse volumique": 52, "Notation scientifique": 24, "Concentration massique": 40, "Réfraction": 45 },
-      },
-      {
-        id: "s11", name: "Lucas Petit", email: "lucas.p@lycee.fr", accuracy: 82, exercisesDone: 27,
-        weakSkill: "Réfraction", lastActive: "Aujourd'hui", status: "top",
-        skills: { "Loi d'Ohm": 90, "Masse volumique": 86, "Notation scientifique": 80, "Concentration massique": 84, "Réfraction": 65 },
-      },
-      {
-        id: "s12", name: "Maya Gharbi", email: "maya.g@lycee.fr", accuracy: 69, exercisesDone: 18,
-        weakSkill: "Notation scientifique", lastActive: "Il y a 6h", status: "active",
-        skills: { "Loi d'Ohm": 78, "Masse volumique": 74, "Notation scientifique": 44, "Concentration massique": 72, "Réfraction": 75 },
-      },
-    ],
-  },
-];
-
-const DEFAULT_EXERCISES: ExerciseItem[] = [
-  {
-    id: "ex-1",
-    title: "Loi d'Ohm & conversion mA/A",
-    level: "Seconde",
-    domain: "Électricité",
-    chapter: "Circuits électriques",
-    difficulty: "Standard",
-    source: "Officiel",
-    status: "published",
-    version: "v1.2",
-    skills: ["Loi d'Ohm", "Conversion d'unités"],
-    statement: "Un conducteur ohmique de résistance R = {R} Ω est soumis à une tension U = {U} V.",
-    questions: [
-      { prompt: "Exprimer I en fonction de U et R.", type: "Expression", expected: "I = U / R" },
-      { prompt: "Calculer I en mA avec 2 chiffres significatifs.", type: "Grandeur", expected: "(U / R) * 1000 mA" },
-    ],
-  },
-  {
-    id: "ex-2",
-    title: "Chute libre avec frottements — Type Bac",
-    level: "Terminale",
-    domain: "Mécanique",
-    chapter: "Mouvement dans un champ uniforme",
-    difficulty: "Type Bac",
-    source: "IA approuvé",
-    status: "published",
-    version: "v1.0",
-    skills: ["Lois de Newton", "Chute libre"],
-    statement: "Une bille de masse m = {m} g est lâchée sans vitesse initiale dans un fluide exerçant une force de frottement f = k·v.",
-    questions: [
-      { prompt: "Établir l'équation différentielle vérifiée par v(t).", type: "Expression", expected: "dv/dt + (k/m)*v = g" },
-      { prompt: "Déterminer l'expression de la vitesse limite v_lim.", type: "Expression", expected: "m*g/k" },
-      { prompt: "Calculer v_lim en m·s⁻¹.", type: "Grandeur", expected: "m*g/k m/s" },
-    ],
-  },
-  {
-    id: "ex-3",
-    title: "Tableau d'avancement & réactif limitant",
-    level: "Première",
-    domain: "Chimie",
-    chapter: "Suivi d'une transformation chimique",
-    difficulty: "Guidé",
-    source: "Officiel",
-    status: "published",
-    version: "v2.0",
-    skills: ["Tableau d'avancement", "Quantité de matière"],
-    statement: "On mélange n₁ = {n1} mol de Mg avec n₂ = {n2} mol d'ions H⁺ selon : Mg + 2 H⁺ → Mg²⁺ + H₂.",
-    questions: [
-      { prompt: "Identifier le réactif limitant en justifiant.", type: "Texte libre", expected: "Comparer n1 et n2/2" },
-      { prompt: "Calculer l'avancement maximal x_max en mol.", type: "Grandeur", expected: "min(n1, n2/2) mol" },
-    ],
-  },
-  {
-    id: "ex-4",
-    title: "Titrage acido-basique par pH-métrie",
-    level: "Terminale",
-    domain: "Chimie",
-    chapter: "Acido-basicité",
-    difficulty: "Type Bac",
-    source: "Créé par moi",
-    status: "published",
-    version: "v1.1",
-    skills: ["Acido-basicité", "Chiffres significatifs"],
-    statement: "On titre un volume V_A = {VA} mL d'acide éthanoïque par de la soude de concentration C_B = {CB} mol·L⁻¹. L'équivalence est atteinte à V_E = {VE} mL.",
-    questions: [
-      { prompt: "Écrire l'équation de la réaction support du titrage.", type: "Expression", expected: "CH3COOH + HO- -> CH3COO- + H2O" },
-      { prompt: "Calculer la concentration C_A de l'acide.", type: "Grandeur", expected: "CB * VE / VA mol/L" },
-    ],
-  },
-];
-
-const DEFAULT_ASSIGNMENTS: AssignmentItem[] = [
-  {
-    id: "asg-1",
-    title: "DM #4 — Mécanique & Chute libre",
-    classId: "cls-term-1",
-    exerciseIds: ["ex-2"],
-    dueDate: "24 nov. 2026",
-    mode: "Noté",
-    completedCount: 4,
-    totalStudents: 5,
-  },
-  {
-    id: "asg-2",
-    title: "Remédiation — Conversions mA / A",
-    classId: "cls-term-1",
-    exerciseIds: ["ex-1"],
-    dueDate: "22 nov. 2026",
-    mode: "Entraînement",
-    completedCount: 3,
-    totalStudents: 5,
-  },
-  {
-    id: "asg-3",
-    title: "Entraînement — Tableau d'avancement",
-    classId: "cls-prem-2",
-    exerciseIds: ["ex-3"],
-    dueDate: "25 nov. 2026",
-    mode: "Entraînement",
-    completedCount: 2,
-    totalStudents: 4,
-  },
-];
-
-const DEFAULT_COPIES: CopySubmission[] = [
-  {
-    id: "copy-1",
-    studentName: "Amira Benali",
-    classId: "cls-term-1",
-    assignmentTitle: "DS #2 — Mouvement & Lois de Newton",
-    submittedAt: "Aujourd'hui, 10:42",
-    status: "to_review",
-    aiScore: 14.5,
-    maxScore: 20,
-    teacherScore: 14.5,
-    confidence: "Haute",
-    transcription: [
-      { step: 1, latex: "Système : {bille}, Référentiel : terrestre supposé galiléen", verdict: "correct", note: "Cadre correctement posé (+2/2)" },
-      { step: 2, latex: "ΣF = m·a  ⇒  P + f = m·(dv/dt)", verdict: "correct", note: "2e loi de Newton exacte (+4/4)" },
-      { step: 3, latex: "Projection sur Oz : m·g - k·v = m·(dv/dt)", verdict: "correct", note: "Projection correcte (+4/4)" },
-      { step: 4, latex: "v_lim = m·g / k = 50 × 9,81 / 0,12 = 4087 m/s", verdict: "error", note: "Erreur d'unité : m = 50 g non converti en kg (0,050 kg → 4,1 m/s). Crédit partiel pour la formule (+4,5/10)." },
-    ],
-    teacherComment: "Très bonne démarche en mécanique ! Attention systématique à convertir les grammes en kilogrammes avant l'application numérique.",
-  },
-  {
-    id: "copy-2",
-    studentName: "Mehdi Haddad",
-    classId: "cls-term-1",
-    assignmentTitle: "DS #2 — Mouvement & Lois de Newton",
-    submittedAt: "Aujourd'hui, 10:44",
-    status: "to_review",
-    aiScore: 11,
-    maxScore: 20,
-    teacherScore: 11,
-    confidence: "Moyenne",
-    transcription: [
-      { step: 1, latex: "D'après la 2e loi de Newton : P = m·a", verdict: "partial", note: "Force de frottement f oubliée dans le bilan (+2/6)" },
-      { step: 2, latex: "a = g = 9,81 m·s⁻²", verdict: "correct", note: "Cohérent avec l'étape 1 — non pénalisé deux fois (+4/4)" },
-      { step: 3, latex: "v(t) = 3,5 × t  (ou 8,5 × t ?)", verdict: "uncertain", note: "Écriture manuscrite incertaine (3,5 vs 8,5) — à vérifier visuellement (+5/10)" },
-    ],
-    teacherComment: "Pense à faire le bilan de toutes les forces avant de projeter.",
-  },
-  {
-    id: "copy-3",
-    studentName: "Omar Diallo",
-    classId: "cls-prem-2",
-    assignmentTitle: "Contrôle — Quantité de matière",
-    submittedAt: "Hier, 16:15",
-    status: "to_review",
-    aiScore: 16,
-    maxScore: 20,
-    teacherScore: 16,
-    confidence: "Haute",
-    transcription: [
-      { step: 1, latex: "n(Mg) = m / M = 2,4 / 24,3 = 0,099 mol", verdict: "correct", note: "Calcul et chiffres significatifs exacts (+6/6)" },
-      { step: 2, latex: "n(H⁺) / 2 = 0,15 / 2 = 0,075 mol < n(Mg)", verdict: "correct", note: "Réactif limitant H⁺ bien identifié (+6/6)" },
-      { step: 3, latex: "x_max = 0,15 mol", verdict: "error", note: "Oubli du coefficient stœchiométrique 2 : x_max = 0,075 mol (+4/8)" },
-    ],
-    teacherComment: "Bonne comparaison à l'étape 2, n'oublie pas de reporter la valeur divisée par 2 pour x_max.",
-  },
-];
-
 interface TeacherStoreContextType {
+  loading: boolean;
+  refresh: () => Promise<void>;
   classes: TeacherClass[];
-  selectedClassId: string; // "all" or class.id
+  selectedClassId: string;
   setSelectedClassId: (id: string) => void;
-  createClass: (name: string, level: Level) => TeacherClass;
+  createClass: (name: string, level: Level) => Promise<TeacherClass | null>;
   addStudentToClass: (classId: string, name: string, email: string) => void;
   resolveAlert: (classId: string, alertId: string) => void;
   exercises: ExerciseItem[];
-  addExercise: (ex: Omit<ExerciseItem, "id">) => ExerciseItem;
+  addExercise: (ex: Omit<ExerciseItem, "id">) => Promise<ExerciseItem>;
   assignments: AssignmentItem[];
-  addAssignment: (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">) => void;
+  addAssignment: (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">) => Promise<void>;
   copies: CopySubmission[];
   updateCopy: (copyId: string, updates: Partial<CopySubmission>) => void;
 }
 
 const TeacherStoreContext = createContext<TeacherStoreContextType | null>(null);
-
-const STORAGE_KEY = "spc_teacher_store_v1";
 
 const CLASS_COLORS = [
   "from-indigo-500 to-violet-600",
@@ -377,169 +110,405 @@ const CLASS_COLORS = [
   "from-cyan-500 to-blue-600",
 ];
 
+const DEFAULT_SKILLS_BY_LEVEL: Record<Level, string[]> = {
+  Seconde: ["Loi d'Ohm (U = R · I)", "Conversion d'unités SI (mA ↔ A, g ↔ kg)", "Chiffres significatifs"],
+  Première: ["Tableau d'avancement & réactif limitant", "Conversion d'unités SI (mA ↔ A, g ↔ kg)", "Deuxième loi de Newton"],
+  Terminale: [
+    "Loi d'Ohm (U = R · I)",
+    "Conversion d'unités SI (mA ↔ A, g ↔ kg)",
+    "Deuxième loi de Newton",
+    "Chute libre & chute avec frottements",
+    "Titrages acido-basiques",
+  ],
+};
+
+// Official verified exercises come directly from curriculum-bank.ts (real runnable exercises, not fake placeholders!)
+const OFFICIAL_EXERCISES: ExerciseItem[] = CURRICULUM_EXERCISES.map((ex) => {
+  const sample = ex.generate(0);
+  return {
+    id: ex.id,
+    title: ex.title,
+    level: ex.level,
+    domain: ex.domain,
+    chapter: ex.chapter,
+    difficulty: ex.difficulty,
+    source: "Officiel",
+    status: "published",
+    version: "v1.0",
+    skills: ex.conceptCodes,
+    statement: sample.statement,
+    questions: sample.questions.map((q) => ({
+      prompt: q.prompt,
+      type: q.type === "expression" ? "Expression" : "Grandeur",
+      expected: q.expected,
+    })),
+  };
+});
+
 function generateInviteCode(level: Level) {
   const prefix = level === "Terminale" ? "TS" : level === "Première" ? "1S" : "2D";
-  const rand = Math.random().toString(36).substring(2, 5).toUpperCase();
+  const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
   return `PHY-2026-${prefix}${rand}`;
 }
 
 export function TeacherStoreProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [classes, setClasses] = useState<TeacherClass[]>(DEFAULT_CLASSES);
+  const [loading, setLoading] = useState(true);
+  const [classes, setClasses] = useState<TeacherClass[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>("all");
-  const [exercises, setExercises] = useState<ExerciseItem[]>(DEFAULT_EXERCISES);
-  const [assignments, setAssignments] = useState<AssignmentItem[]>(DEFAULT_ASSIGNMENTS);
-  const [copies, setCopies] = useState<CopySubmission[]>(DEFAULT_COPIES);
-  const [hydrated, setHydrated] = useState(false);
+  const [exercises, setExercises] = useState<ExerciseItem[]>(OFFICIAL_EXERCISES);
+  const [assignments, setAssignments] = useState<AssignmentItem[]>([]);
+  const [copies, setCopies] = useState<CopySubmission[]>([]);
 
-  useEffect(() => {
-    async function loadData() {
-      const supabase = getSupabaseBrowserClient();
-      if (isSupabaseConfigured && supabase && user?.id) {
-        const { data: dbClasses } = await supabase
-          .from("classes")
-          .select("id, name, level, invite_code, color, class_members(student_id, profiles(id, first_name, last_name, email))")
-          .eq("teacher_id", user.id)
-          .order("created_at", { ascending: true });
+  const loadFromSupabase = useCallback(async () => {
+    const supabase = getSupabaseBrowserClient();
+    if (!isSupabaseConfigured || !supabase || !user?.id) {
+      setClasses([]);
+      setAssignments([]);
+      setCopies([]);
+      setExercises(OFFICIAL_EXERCISES);
+      setLoading(false);
+      return;
+    }
 
-        if (dbClasses && dbClasses.length > 0) {
-          const defaultSkillsByLevel: Record<Level, string[]> = {
-            Seconde: ["Loi d'Ohm", "Masse volumique", "Notation scientifique", "Concentration massique"],
-            Première: ["Tableau d'avancement", "Oxydoréduction", "Quantité de matière", "Forces & vecteurs"],
-            Terminale: ["Loi d'Ohm", "Conversion d'unités", "Lois de Newton", "Chute libre", "Acido-basicité"],
-          };
-          const mapped: TeacherClass[] = dbClasses.map((row: Record<string, unknown>, idx: number) => {
-            const lvl = (row.level as Level) || "Terminale";
-            const skills = defaultSkillsByLevel[lvl];
-            const members = (row.class_members as Array<Record<string, unknown>>) || [];
-            const students: StudentRecord[] = members.map((m) => {
-              const p = (Array.isArray(m.profiles) ? m.profiles[0] : m.profiles) as Record<string, string> | null;
-              const skillsMap: Record<string, number> = {};
-              skills.forEach((s) => (skillsMap[s] = 60));
-              return {
-                id: String(m.student_id),
-                name: p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : "Élève",
-                email: p?.email || "",
-                accuracy: 60,
-                exercisesDone: 0,
-                weakSkill: "À évaluer",
-                lastActive: "Inscrit",
-                status: "active",
-                skills: skillsMap,
-              };
+    setLoading(true);
+    try {
+      // 1. Load teacher's classes + enrolled student profiles
+      const { data: dbClasses } = await supabase
+        .from("classes")
+        .select(
+          "id, name, level, invite_code, color, class_members(student_id, joined_at, profiles(id, first_name, last_name, email))"
+        )
+        .eq("teacher_id", user.id)
+        .order("created_at", { ascending: true });
+
+      const studentIds: string[] = [];
+      (dbClasses || []).forEach((row: Record<string, unknown>) => {
+        const members = (row.class_members as Array<Record<string, unknown>>) || [];
+        members.forEach((m) => {
+          if (m.student_id) studentIds.push(String(m.student_id));
+        });
+      });
+
+      const uniqueStudentIds = Array.from(new Set(studentIds));
+
+      // 2. Load real concept_mastery + real submissions for all enrolled students
+      let masteryByStudent = new Map<string, Record<string, number>>();
+      let subsByStudent = new Map<
+        string,
+        { count: number; avgPct: number; lastDate: string | null }
+      >();
+      const realPhotoCopies: CopySubmission[] = [];
+
+      if (uniqueStudentIds.length > 0) {
+        const [{ data: masteryRows }, { data: subRows }] = await Promise.all([
+          supabase
+            .from("concept_mastery")
+            .select("student_id, mastery_score, concepts(label)")
+            .in("student_id", uniqueStudentIds),
+          supabase
+            .from("submissions")
+            .select(
+              "id, student_id, input_mode, rendered_params, raw_answers, created_at, evaluation_results(score, max_score, status, feedback_summary)"
+            )
+            .in("student_id", uniqueStudentIds)
+            .order("created_at", { ascending: false }),
+        ]);
+
+        masteryByStudent = new Map();
+        (masteryRows || []).forEach((m: Record<string, unknown>) => {
+          const sid = String(m.student_id);
+          const c = (Array.isArray(m.concepts) ? m.concepts[0] : m.concepts) as Record<string, string> | null;
+          const label = c?.label || "Compétence";
+          if (!masteryByStudent.has(sid)) masteryByStudent.set(sid, {});
+          masteryByStudent.get(sid)![label] = Number(m.mastery_score || 0);
+        });
+
+        const accMap = new Map<string, { sumPct: number; count: number; lastDate: string | null }>();
+        (subRows || []).forEach((s: Record<string, unknown>) => {
+          const sid = String(s.student_id);
+          const ev = (Array.isArray(s.evaluation_results)
+            ? s.evaluation_results[0]
+            : s.evaluation_results) as Record<string, unknown> | null;
+          const score = Number(ev?.score ?? 0);
+          const maxScore = Number(ev?.max_score ?? 1);
+          const pct = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0;
+
+          if (!accMap.has(sid)) accMap.set(sid, { sumPct: 0, count: 0, lastDate: String(s.created_at) });
+          const entry = accMap.get(sid)!;
+          entry.sumPct += pct;
+          entry.count += 1;
+
+          if (s.input_mode === "photo") {
+            const rawAns = (s.raw_answers as Record<string, unknown>) || {};
+            const rawLines = Array.isArray(rawAns.lines) ? rawAns.lines : [];
+            const studentClass = (dbClasses || []).find((c: Record<string, unknown>) =>
+              ((c.class_members as Array<Record<string, unknown>>) || []).some(
+                (cm) => String(cm.student_id) === sid
+              )
+            );
+            const memberRow = ((studentClass?.class_members as Array<Record<string, unknown>>) || []).find(
+              (cm) => String(cm.student_id) === sid
+            );
+            const p = (Array.isArray(memberRow?.profiles)
+              ? memberRow?.profiles[0]
+              : memberRow?.profiles) as Record<string, string> | null;
+
+            realPhotoCopies.push({
+              id: String(s.id),
+              studentName: p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : "Élève",
+              classId: studentClass ? String(studentClass.id) : "",
+              assignmentTitle: String(
+                ((s.rendered_params as Record<string, unknown>)?.exerciseTitle as string) ||
+                  "Copie manuscrite soumise"
+              ),
+              submittedAt: new Date(String(s.created_at)).toLocaleString("fr-FR"),
+              status: "to_review",
+              aiScore: Number((score * 10).toFixed(1)),
+              maxScore: 20,
+              teacherScore: Number((score * 10).toFixed(1)),
+              confidence: "Haute",
+              transcription: rawLines.map((line: Record<string, unknown>, idx: number) => ({
+                step: idx + 1,
+                latex: String(line.text || ""),
+                verdict: line.confidence === "low" ? "uncertain" : "correct",
+                note:
+                  line.confidence === "low"
+                    ? "Ligne incertaine à vérifier visuellement"
+                    : "Transcrit et confirmé par l'élève",
+              })),
+              teacherComment: "",
             });
+          }
+        });
+
+        subsByStudent = new Map();
+        accMap.forEach((v, k) => {
+          subsByStudent.set(k, {
+            count: v.count,
+            avgPct: v.count > 0 ? Math.round(v.sumPct / v.count) : 0,
+            lastDate: v.lastDate,
+          });
+        });
+      }
+
+      // 3. Build clean TeacherClass objects from real DB rows ONLY
+      const mappedClasses: TeacherClass[] = (dbClasses || []).map(
+        (row: Record<string, unknown>, idx: number) => {
+          const lvl = (row.level as Level) || "Terminale";
+          const members = (row.class_members as Array<Record<string, unknown>>) || [];
+
+          const discoveredSkills = new Set<string>(DEFAULT_SKILLS_BY_LEVEL[lvl]);
+          const students: StudentRecord[] = members.map((m) => {
+            const sid = String(m.student_id);
+            const p = (Array.isArray(m.profiles) ? m.profiles[0] : m.profiles) as Record<
+              string,
+              string
+            > | null;
+            const sSkills = masteryByStudent.get(sid) || {};
+            Object.keys(sSkills).forEach((k) => discoveredSkills.add(k));
+
+            const subStats = subsByStudent.get(sid);
+            const accuracy = subStats ? subStats.avgPct : 0;
+            const exercisesDone = subStats ? subStats.count : 0;
+
+            const skillEntries = Object.entries(sSkills);
+            const weakest =
+              skillEntries.length > 0
+                ? skillEntries.sort((a, b) => a[1] - b[1])[0]
+                : null;
+
+            const status: StudentRecord["status"] =
+              exercisesDone === 0
+                ? "active"
+                : accuracy >= 80
+                ? "top"
+                : accuracy < 55
+                ? "struggling"
+                : "active";
+
             return {
-              id: String(row.id),
-              name: String(row.name),
-              level: lvl,
-              inviteCode: String(row.invite_code),
-              color: String(row.color || CLASS_COLORS[idx % CLASS_COLORS.length]),
-              skills,
-              alerts: [],
-              students,
+              id: sid,
+              name: p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : "Élève",
+              email: p?.email || "",
+              accuracy,
+              exercisesDone,
+              weakSkill: weakest && weakest[1] < 70 ? weakest[0] : exercisesDone === 0 ? "Aucun exercice encore" : "Bonne maîtrise",
+              lastActive: subStats?.lastDate
+                ? new Date(subStats.lastDate).toLocaleDateString("fr-FR")
+                : "Inscrit récemment",
+              status,
+              skills: sSkills,
             };
           });
-          setClasses(mapped);
-          setHydrated(true);
-          return;
-        }
-      }
 
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed.classes?.length) setClasses(parsed.classes);
-          if (parsed.exercises?.length) setExercises(parsed.exercises);
-          if (parsed.assignments?.length) setAssignments(parsed.assignments);
-          if (parsed.copies?.length) setCopies(parsed.copies);
+          // Generate real alerts ONLY from real student metrics
+          const realAlerts: ClassAlert[] = [];
+          const strugglingCount = students.filter((s) => s.status === "struggling").length;
+          if (strugglingCount > 0) {
+            realAlerts.push({
+              id: `alert-struggle-${row.id}`,
+              text: `${strugglingCount} élève(s) ont une moyenne inférieure à 55% dans cette classe.`,
+              action: "Voir la heatmap",
+              severity: "high",
+            });
+          }
+          const classCopies = realPhotoCopies.filter((c) => c.classId === String(row.id));
+          if (classCopies.length > 0) {
+            realAlerts.push({
+              id: `alert-copies-${row.id}`,
+              text: `${classCopies.length} copie(s) manuscrite(s) en attente de validation.`,
+              action: "Valider les copies",
+              severity: "info",
+            });
+          }
+
+          return {
+            id: String(row.id),
+            name: String(row.name),
+            level: lvl,
+            inviteCode: String(row.invite_code),
+            color: String(row.color || CLASS_COLORS[idx % CLASS_COLORS.length]),
+            skills: Array.from(discoveredSkills),
+            alerts: realAlerts,
+            students,
+          };
         }
-      } catch {
-        // ignore storage errors
-      }
-      setHydrated(true);
+      );
+
+      setClasses(mappedClasses);
+      setCopies(realPhotoCopies);
+
+      // 4. Load teacher's real assignments from Supabase
+      const { data: dbAssignments } = await supabase
+        .from("assignments")
+        .select("id, title, class_id, mode, due_at, created_at")
+        .eq("teacher_id", user.id)
+        .order("created_at", { ascending: false });
+
+      setAssignments(
+        (dbAssignments || []).map((a: Record<string, unknown>) => {
+          const cls = mappedClasses.find((c) => c.id === String(a.class_id));
+          return {
+            id: String(a.id),
+            title: String(a.title),
+            classId: String(a.class_id),
+            exerciseIds: [],
+            dueDate: a.due_at
+              ? new Date(String(a.due_at)).toLocaleDateString("fr-FR")
+              : "Sans date limite",
+            mode: a.mode === "graded" ? "Noté" : "Entraînement",
+            completedCount: 0,
+            totalStudents: cls?.students.length || 0,
+          };
+        })
+      );
+
+      // 5. Load teacher's custom exercises from Supabase + append official curriculum exercises
+      const { data: dbExRows } = await supabase
+        .from("exercises")
+        .select(
+          "id, level, domain, chapter, difficulty, source, status, exercise_versions(version_number, title, statement_template, questions_schema)"
+        )
+        .eq("author_id", user.id)
+        .order("created_at", { ascending: false });
+
+      const customExercises: ExerciseItem[] = (dbExRows || []).map((e: Record<string, unknown>) => {
+        const versions = (e.exercise_versions as Array<Record<string, unknown>>) || [];
+        const latest = versions[versions.length - 1] || {};
+        const diffMap: Record<string, ExerciseItem["difficulty"]> = {
+          guided: "Guidé",
+          standard: "Standard",
+          bac: "Type Bac",
+        };
+        const srcMap: Record<string, ExerciseItem["source"]> = {
+          official: "Officiel",
+          teacher: "Créé par moi",
+          ai_approved: "IA approuvé",
+        };
+        return {
+          id: String(e.id),
+          title: String(latest.title || "Exercice personnalisé"),
+          level: (e.level as Level) || "Terminale",
+          domain: String(e.domain || "Physique-Chimie"),
+          chapter: String(e.chapter || ""),
+          difficulty: diffMap[String(e.difficulty)] || "Standard",
+          source: srcMap[String(e.source)] || "Créé par moi",
+          status: e.status === "published" ? "published" : "draft",
+          version: `v${latest.version_number || 1}.0`,
+          skills: [],
+          statement: String(latest.statement_template || ""),
+          questions: Array.isArray(latest.questions_schema)
+            ? (latest.questions_schema as ExerciseItem["questions"])
+            : [],
+        };
+      });
+
+      setExercises([...customExercises, ...OFFICIAL_EXERCISES]);
+    } finally {
+      setLoading(false);
     }
-    loadData();
   }, [user?.id]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ classes, exercises, assignments, copies })
-      );
-    } catch {
-      // ignore storage errors
-    }
-  }, [classes, exercises, assignments, copies, hydrated]);
+    loadFromSupabase();
+  }, [loadFromSupabase]);
 
-  const createClass = (name: string, level: Level): TeacherClass => {
-    const defaultSkillsByLevel: Record<Level, string[]> = {
-      Seconde: ["Loi d'Ohm", "Masse volumique", "Notation scientifique", "Concentration massique"],
-      Première: ["Tableau d'avancement", "Oxydoréduction", "Quantité de matière", "Forces & vecteurs"],
-      Terminale: ["Loi d'Ohm", "Conversion d'unités", "Lois de Newton", "Chute libre", "Acido-basicité"],
-    };
+  const createClass = async (name: string, level: Level): Promise<TeacherClass | null> => {
+    const supabase = getSupabaseBrowserClient();
     const inviteCode = generateInviteCode(level);
     const color = CLASS_COLORS[classes.length % CLASS_COLORS.length];
-    const newClass: TeacherClass = {
-      id: `cls-${Date.now()}`,
-      name: name.trim(),
-      level,
-      inviteCode,
-      color,
-      skills: defaultSkillsByLevel[level],
-      alerts: [],
-      students: [],
-    };
-    setClasses((prev) => [...prev, newClass]);
-    setSelectedClassId(newClass.id);
 
-    // Sync to Supabase PostgreSQL if configured
-    const supabase = getSupabaseBrowserClient();
     if (isSupabaseConfigured && supabase && user?.id) {
-      supabase
+      const { data, error } = await supabase
         .from("classes")
         .insert({
           teacher_id: user.id,
-          name: newClass.name,
-          level: newClass.level,
+          name: name.trim(),
+          level,
           invite_code: inviteCode,
           color,
         })
         .select("id")
-        .single()
-        .then(({ data }) => {
-          if (data?.id) {
-            setClasses((prev) =>
-              prev.map((c) => (c.id === newClass.id ? { ...c, id: data.id } : c))
-            );
-            setSelectedClassId(data.id);
-          }
-        });
-    }
+        .single();
 
-    return newClass;
+      if (error || !data?.id) {
+        console.error("Create class error:", error?.message);
+        return null;
+      }
+
+      const created: TeacherClass = {
+        id: data.id,
+        name: name.trim(),
+        level,
+        inviteCode,
+        color,
+        skills: DEFAULT_SKILLS_BY_LEVEL[level],
+        alerts: [],
+        students: [],
+      };
+      setClasses((prev) => [...prev, created]);
+      setSelectedClassId(created.id);
+      return created;
+    }
+    return null;
   };
 
+  // Manual roster preview note (real students join cleanly via class invite code!)
   const addStudentToClass = (classId: string, name: string, email: string) => {
     setClasses((prev) =>
       prev.map((cls) => {
         if (cls.id !== classId) return cls;
-        const skillsMap: Record<string, number> = {};
-        cls.skills.forEach((sk) => {
-          skillsMap[sk] = 50;
-        });
         const newStudent: StudentRecord = {
-          id: `stu-${Date.now()}`,
+          id: `invited-${Date.now()}`,
           name: name.trim(),
-          email: email.trim() || `${name.toLowerCase().replace(/\s+/g, ".")}@lycee.fr`,
-          accuracy: 50,
+          email: email.trim(),
+          accuracy: 0,
           exercisesDone: 0,
-          weakSkill: "À évaluer",
-          lastActive: "Vient d'être invité",
+          weakSkill: "Invitation en attente",
+          lastActive: "Code à utiliser : " + cls.inviteCode,
           status: "active",
-          skills: skillsMap,
+          skills: {},
         };
         return { ...cls, students: [...cls.students, newStudent] };
       })
@@ -559,11 +528,10 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const addExercise = (ex: Omit<ExerciseItem, "id">): ExerciseItem => {
-    const created: ExerciseItem = { ...ex, id: `ex-${Date.now()}` };
-    setExercises((prev) => [created, ...prev]);
-
+  const addExercise = async (ex: Omit<ExerciseItem, "id">): Promise<ExerciseItem> => {
     const supabase = getSupabaseBrowserClient();
+    let newId = `ex-${Date.now()}`;
+
     if (isSupabaseConfigured && supabase && user?.id) {
       const diffMap: Record<ExerciseItem["difficulty"], string> = {
         Guidé: "guided",
@@ -575,7 +543,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         "Créé par moi": "teacher",
         "IA approuvé": "ai_approved",
       };
-      supabase
+      const { data } = await supabase
         .from("exercises")
         .insert({
           author_id: user.id,
@@ -587,36 +555,34 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           status: "published",
         })
         .select("id")
-        .single()
-        .then(({ data }) => {
-          if (data?.id) {
-            supabase.from("exercise_versions").insert({
-              exercise_id: data.id,
-              version_number: 1,
-              title: ex.title,
-              statement_template: ex.statement,
-              questions_schema: ex.questions,
-            });
-          }
+        .single();
+
+      if (data?.id) {
+        newId = data.id;
+        await supabase.from("exercise_versions").insert({
+          exercise_id: data.id,
+          version_number: 1,
+          title: ex.title,
+          statement_template: ex.statement,
+          questions_schema: ex.questions,
         });
+      }
     }
+
+    const created: ExerciseItem = { ...ex, id: newId };
+    setExercises((prev) => [created, ...prev]);
     return created;
   };
 
-  const addAssignment = (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">) => {
-    const cls = classes.find((c) => c.id === asg.classId);
-    const created: AssignmentItem = {
-      ...asg,
-      id: `asg-${Date.now()}`,
-      completedCount: 0,
-      totalStudents: cls?.students.length || 0,
-    };
-    setAssignments((prev) => [created, ...prev]);
-
+  const addAssignment = async (
+    asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">
+  ) => {
     const supabase = getSupabaseBrowserClient();
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(asg.classId);
-    if (isSupabaseConfigured && supabase && user?.id && isUuid) {
-      supabase
+    const cls = classes.find((c) => c.id === asg.classId);
+    let newId = `asg-${Date.now()}`;
+
+    if (isSupabaseConfigured && supabase && user?.id) {
+      const { data } = await supabase
         .from("assignments")
         .insert({
           class_id: asg.classId,
@@ -624,8 +590,18 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           title: asg.title,
           mode: asg.mode === "Noté" ? "graded" : "practice",
         })
-        .then(() => {});
+        .select("id")
+        .single();
+      if (data?.id) newId = data.id;
     }
+
+    const created: AssignmentItem = {
+      ...asg,
+      id: newId,
+      completedCount: 0,
+      totalStudents: cls?.students.length || 0,
+    };
+    setAssignments((prev) => [created, ...prev]);
   };
 
   const updateCopy = (copyId: string, updates: Partial<CopySubmission>) => {
@@ -635,6 +611,8 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
   return (
     <TeacherStoreContext.Provider
       value={{
+        loading,
+        refresh: loadFromSupabase,
         classes,
         selectedClassId,
         setSelectedClassId,

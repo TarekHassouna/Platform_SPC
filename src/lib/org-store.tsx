@@ -1,5 +1,7 @@
 "use client";
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
+import { useAuth } from "@/lib/auth-context";
 
 export interface OrgTeacher {
   id: string;
@@ -33,127 +35,114 @@ export interface OrgInvoice {
 
 interface OrgStoreContextType {
   orgName: string;
+  orgInviteCode: string;
   seatsPurchased: number;
   billingCycle: "monthly" | "yearly";
   setBillingCycle: (cycle: "monthly" | "yearly") => void;
   teachers: OrgTeacher[];
   inviteTeacher: (name: string, email: string, levels: string[]) => void;
   seats: OrgSeat[];
-  assignSeat: (studentName: string, studentEmail: string, className: string, level: "Seconde" | "Première" | "Terminale") => boolean;
+  assignSeat: (
+    studentName: string,
+    studentEmail: string,
+    className: string,
+    level: "Seconde" | "Première" | "Terminale"
+  ) => boolean;
   revokeSeat: (seatId: string) => void;
   purchaseSeats: (additional: number) => void;
   invoices: OrgInvoice[];
   unitPriceForSeats: (totalSeats: number) => number | null;
 }
 
-const DEFAULT_TEACHERS: OrgTeacher[] = [
-  {
-    id: "t1",
-    name: "Sondos Elsamny",
-    email: "s.elsamny@lycee-francais.edu",
-    levels: ["Terminale", "Première"],
-    classesCount: 3,
-    studentsCount: 68,
-    status: "active",
-    lastActive: "Il y a 15 min",
-  },
-  {
-    id: "t2",
-    name: "Marc Lefèvre",
-    email: "m.lefevre@lycee-francais.edu",
-    levels: ["Seconde", "Première"],
-    classesCount: 2,
-    studentsCount: 44,
-    status: "active",
-    lastActive: "Hier",
-  },
-  {
-    id: "t3",
-    name: "Nadia Mansouri",
-    email: "n.mansouri@lycee-francais.edu",
-    levels: ["Terminale"],
-    classesCount: 1,
-    studentsCount: 22,
-    status: "invited",
-    lastActive: "Invitation envoyée",
-  },
-];
-
-const DEFAULT_SEATS: OrgSeat[] = [
-  { id: "st1", studentName: "Amira Benali", studentEmail: "amira.b@lycee.edu", className: "Terminale Spé 1", level: "Terminale", assignedAt: "02 sept. 2026", active: true },
-  { id: "st2", studentName: "Karim Saidi", studentEmail: "karim.s@lycee.edu", className: "Terminale Spé 1", level: "Terminale", assignedAt: "02 sept. 2026", active: true },
-  { id: "st3", studentName: "Lina Mansour", studentEmail: "lina.m@lycee.edu", className: "Terminale Spé 1", level: "Terminale", assignedAt: "03 sept. 2026", active: true },
-  { id: "st4", studentName: "Omar Diallo", studentEmail: "omar.d@lycee.edu", className: "Première Spé B", level: "Première", assignedAt: "04 sept. 2026", active: true },
-  { id: "st5", studentName: "Chloé Laurent", studentEmail: "chloe.l@lycee.edu", className: "Première Spé B", level: "Première", assignedAt: "04 sept. 2026", active: true },
-  { id: "st6", studentName: "Yassine Amrani", studentEmail: "yassine.a@lycee.edu", className: "Seconde 3", level: "Seconde", assignedAt: "05 sept. 2026", active: true },
-];
-
-const DEFAULT_INVOICES: OrgInvoice[] = [
-  { id: "ORG-2026-09", date: "01 sept. 2026", description: "Licence Établissement — 60 sièges (Annuel)", seats: 60, amount: "300,00 €", status: "Payée" },
-  { id: "ORG-2026-10", date: "15 oct. 2026", description: "Extension — +20 sièges élèves", seats: 20, amount: "100,00 €", status: "Payée" },
-];
-
 export function getUnitPriceForSeats(totalSeats: number): number | null {
-  if (totalSeats >= 300) return null; // Quote
+  if (totalSeats >= 300) return null;
   if (totalSeats >= 150) return 4;
   if (totalSeats >= 60) return 5;
   if (totalSeats >= 30) return 6;
   return 7;
 }
 
-const STORAGE_KEY = "spc_org_store_v1";
 const OrgStoreContext = createContext<OrgStoreContextType | null>(null);
 
 export function OrgStoreProvider({ children }: { children: ReactNode }) {
-  const [orgName] = useState("Lycée Français International");
-  const [seatsPurchased, setSeatsPurchased] = useState(80);
+  const { user, memberships } = useAuth();
+  const [orgName, setOrgName] = useState(user?.school || "Mon établissement");
+  const [orgInviteCode, setOrgInviteCode] = useState("");
+  const [seatsPurchased, setSeatsPurchased] = useState(user?.orgSeats || 60);
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly");
-  const [teachers, setTeachers] = useState<OrgTeacher[]>(DEFAULT_TEACHERS);
-  const [seats, setSeats] = useState<OrgSeat[]>(DEFAULT_SEATS);
-  const [invoices, setInvoices] = useState<OrgInvoice[]>(DEFAULT_INVOICES);
-  const [hydrated, setHydrated] = useState(false);
+  const [teachers, setTeachers] = useState<OrgTeacher[]>([]);
+  const [seats, setSeats] = useState<OrgSeat[]>([]);
+  const [invoices, setInvoices] = useState<OrgInvoice[]>([]);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed.seatsPurchased) setSeatsPurchased(parsed.seatsPurchased);
-        if (parsed.billingCycle) setBillingCycle(parsed.billingCycle);
-        if (parsed.teachers?.length) setTeachers(parsed.teachers);
-        if (parsed.seats?.length) setSeats(parsed.seats);
-        if (parsed.invoices?.length) setInvoices(parsed.invoices);
+    async function loadOrg() {
+      const primaryOrg = memberships.find((m) => m.role === "org_admin")?.organization || memberships[0]?.organization;
+      if (primaryOrg) {
+        setOrgName(primaryOrg.name);
+        setOrgInviteCode(primaryOrg.invite_code);
+        setSeatsPurchased(primaryOrg.seats_purchased);
+      } else if (user?.school) {
+        setOrgName(user.school);
       }
-    } catch {
-      // ignore
-    }
-    setHydrated(true);
-  }, []);
 
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ seatsPurchased, billingCycle, teachers, seats, invoices })
-      );
-    } catch {
-      // ignore
+      const supabase = getSupabaseBrowserClient();
+      if (!isSupabaseConfigured || !supabase || !primaryOrg?.id) return;
+
+      const { data: memRows } = await supabase
+        .from("memberships")
+        .select("id, role, status, created_at, profiles(first_name, last_name, email, level)")
+        .eq("organization_id", primaryOrg.id);
+
+      const dbTeachers: OrgTeacher[] = [];
+      const dbSeats: OrgSeat[] = [];
+
+      (memRows || []).forEach((m: Record<string, unknown>) => {
+        const p = (Array.isArray(m.profiles) ? m.profiles[0] : m.profiles) as Record<string, string> | null;
+        const fullName = p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : "Membre";
+        if (m.role === "teacher") {
+          dbTeachers.push({
+            id: String(m.id),
+            name: fullName,
+            email: p?.email || "",
+            levels: ["Seconde", "Première", "Terminale"],
+            classesCount: 0,
+            studentsCount: 0,
+            status: m.status === "invited" ? "invited" : "active",
+            lastActive: new Date(String(m.created_at)).toLocaleDateString("fr-FR"),
+          });
+        } else if (m.role === "student") {
+          dbSeats.push({
+            id: String(m.id),
+            studentName: fullName,
+            studentEmail: p?.email || "",
+            className: p?.level || "Lycée",
+            level: (p?.level as OrgSeat["level"]) || "Terminale",
+            assignedAt: new Date(String(m.created_at)).toLocaleDateString("fr-FR"),
+            active: true,
+          });
+        }
+      });
+
+      setTeachers(dbTeachers);
+      setSeats(dbSeats);
     }
-  }, [seatsPurchased, billingCycle, teachers, seats, invoices, hydrated]);
+    loadOrg();
+  }, [user, memberships]);
 
   const inviteTeacher = (name: string, email: string, levels: string[]) => {
-    const t: OrgTeacher = {
-      id: `t-${Date.now()}`,
-      name: name.trim(),
-      email: email.trim(),
-      levels: levels.length ? levels : ["Terminale"],
-      classesCount: 0,
-      studentsCount: 0,
-      status: "invited",
-      lastActive: "Invitation envoyée à l'instant",
-    };
-    setTeachers((prev) => [t, ...prev]);
+    setTeachers((prev) => [
+      {
+        id: `t-${Date.now()}`,
+        name: name.trim(),
+        email: email.trim(),
+        levels: levels.length ? levels : ["Terminale"],
+        classesCount: 0,
+        studentsCount: 0,
+        status: "invited",
+        lastActive: "Invitation envoyée",
+      },
+      ...prev,
+    ]);
   };
 
   const assignSeat = (
@@ -163,16 +152,18 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
     level: "Seconde" | "Première" | "Terminale"
   ) => {
     if (seats.length >= seatsPurchased) return false;
-    const next: OrgSeat = {
-      id: `st-${Date.now()}`,
-      studentName: studentName.trim(),
-      studentEmail: studentEmail.trim() || `${studentName.toLowerCase().replace(/\s+/g, ".")}@lycee.edu`,
-      className: className.trim() || `${level} A`,
-      level,
-      assignedAt: "Aujourd'hui",
-      active: true,
-    };
-    setSeats((prev) => [next, ...prev]);
+    setSeats((prev) => [
+      {
+        id: `st-${Date.now()}`,
+        studentName: studentName.trim(),
+        studentEmail: studentEmail.trim(),
+        className: className.trim() || level,
+        level,
+        assignedAt: "Aujourd'hui",
+        active: true,
+      },
+      ...prev,
+    ]);
     return true;
   };
 
@@ -187,8 +178,8 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
     setSeatsPurchased(newTotal);
     setInvoices((prev) => [
       {
-        id: `ORG-2026-${Math.floor(10 + Math.random() * 89)}`,
-        date: "Aujourd'hui",
+        id: `ORG-${Date.now().toString().slice(-6)}`,
+        date: new Date().toLocaleDateString("fr-FR"),
         description: `Extension — +${additional} sièges élèves (${unit} €/siège)`,
         seats: additional,
         amount: `${(additional * unit).toFixed(2).replace(".", ",")} €`,
@@ -202,6 +193,7 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
     <OrgStoreContext.Provider
       value={{
         orgName,
+        orgInviteCode,
         seatsPurchased,
         billingCycle,
         setBillingCycle,

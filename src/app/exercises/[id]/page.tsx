@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -19,7 +19,7 @@ type EvalResult = {
   engine: string;
 };
 
-export default function ExerciseRunnerPage() {
+function ExerciseRunnerContent() {
   const params = useParams();
   const router = useRouter();
   const { user, logout } = useAuth();
@@ -455,5 +455,19 @@ export default function ExerciseRunnerPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ExerciseRunnerPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-500">
+          Chargement de l&apos;exercice…
+        </div>
+      }
+    >
+      <ExerciseRunnerContent />
+    </Suspense>
   );
 }

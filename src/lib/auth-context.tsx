@@ -72,61 +72,7 @@ const AuthContext = createContext<AuthContextType>({
 const SESSION_KEY = "spc_user";
 const ACCOUNTS_KEY = "spc_local_accounts_v1";
 
-const SEED_LOCAL_ACCOUNTS: LocalAccountRecord[] = [
-  {
-    email: "eleve@demo.fr",
-    password: "Password123!",
-    profile: {
-      id: "demo-student-1",
-      firstName: "Amira",
-      lastName: "Benali",
-      email: "eleve@demo.fr",
-      role: "student",
-      level: "Terminale",
-      classCode: "PHY-2026-TS1",
-    },
-  },
-  {
-    email: "prof@demo.fr",
-    password: "Password123!",
-    profile: {
-      id: "demo-teacher-1",
-      firstName: "Sondos",
-      lastName: "Elsamny",
-      email: "prof@demo.fr",
-      role: "teacher",
-      school: "Lycée Français du Caire",
-      levels: ["Seconde", "Première", "Terminale"],
-    },
-  },
-  {
-    email: "parent@demo.fr",
-    password: "Password123!",
-    profile: {
-      id: "demo-parent-1",
-      firstName: "Ahmed",
-      lastName: "Benali",
-      email: "parent@demo.fr",
-      role: "parent",
-      childName: "Amira",
-      childEmail: "eleve@demo.fr",
-      childLevel: "Terminale",
-    },
-  },
-  {
-    email: "admin@demo.fr",
-    password: "Password123!",
-    profile: {
-      id: "demo-org-1",
-      firstName: "Direction",
-      lastName: "Lycée",
-      email: "admin@demo.fr",
-      role: "org_admin",
-      school: "Lycée Français International",
-      orgSeats: 80,
-    },
-  },
-];
+const SEED_LOCAL_ACCOUNTS: LocalAccountRecord[] = [];
 
 function readLocalAccounts(): LocalAccountRecord[] {
   try {

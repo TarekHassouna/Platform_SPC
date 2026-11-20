@@ -3,7 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { uploadStudentPhoto } from "@/lib/db";
+import { uploadStudentPhoto, recordPhotoSubmission } from "@/lib/db";
 
 type PhotoMode = "question" | "correct" | "grade";
 
@@ -293,7 +293,18 @@ export default function PhotoSubmissionPage() {
             </div>
 
             <button
-              onClick={() => setStep("result")}
+              onClick={async () => {
+                if (user?.id) {
+                  await recordPhotoSubmission({
+                    studentId: user.id,
+                    fileName: fileName || "copie_manuscrite.jpg",
+                    storagePath,
+                    mode,
+                    lines,
+                  });
+                }
+                setStep("result");
+              }}
               className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100"
             >
               ✅ Confirmer la lecture et analyser

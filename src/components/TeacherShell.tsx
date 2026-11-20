@@ -33,10 +33,10 @@ export function TeacherShell({ children }: TeacherShellProps) {
     router.push("/auth/login");
   };
 
-  const handleCreateClass = (e: React.FormEvent) => {
+  const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newClassName.trim()) return;
-    createClass(newClassName, newClassLevel);
+    await createClass(newClassName, newClassLevel);
     setNewClassName("");
     setShowNewClassModal(false);
   };

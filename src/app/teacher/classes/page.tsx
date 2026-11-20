@@ -16,10 +16,10 @@ export default function TeacherClassesPage() {
   const [studentEmail, setStudentEmail] = useState("");
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    createClass(name, level);
+    await createClass(name, level);
     setName("");
     setShowCreateForm(false);
   };
@@ -109,6 +109,21 @@ export default function TeacherClassesPage() {
       )}
 
       {/* Classes grid */}
+      {classes.length === 0 ? (
+        <div className="bg-white rounded-3xl border border-slate-100 p-12 text-center shadow-sm">
+          <div className="text-4xl mb-3">🏫</div>
+          <h2 className="text-lg font-extrabold text-slate-900 mb-1">Aucune classe pour le moment</h2>
+          <p className="text-sm text-slate-500 mb-5">
+            Créez votre première classe (Seconde, Première ou Terminale) pour obtenir un code d&apos;invitation unique pour vos élèves.
+          </p>
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="bg-indigo-600 text-white font-bold text-sm px-6 py-3 rounded-xl hover:bg-indigo-700"
+          >
+            ➕ Créer ma première classe
+          </button>
+        </div>
+      ) : (
       <div className="grid lg:grid-cols-2 gap-6">
         {classes.map((cls) => {
           const avg = cls.students.length
@@ -242,6 +257,7 @@ export default function TeacherClassesPage() {
           );
         })}
       </div>
+      )}
 
       {/* Add Student Modal */}
       {modalClass && (

@@ -13,7 +13,7 @@ function heatColor(pct: number) {
 
 export default function TeacherDashboard() {
   const { user } = useAuth();
-  const { classes, selectedClassId, setSelectedClassId, resolveAlert, copies, assignments } =
+  const { loading, refresh, classes, selectedClassId, setSelectedClassId, resolveAlert, copies, assignments } =
     useTeacherStore();
   const [toast, setToast] = useState<string | null>(null);
 
@@ -88,7 +88,14 @@ export default function TeacherDashboard() {
               : `Vue globale sur ${classes.length} classes · ${allStudents.length} élèves · ${user?.school || "Établissement"}`}
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={() => refresh()}
+            className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-600 font-semibold px-3.5 py-2.5 rounded-xl hover:border-indigo-300 hover:text-indigo-600 transition-colors text-xs"
+            title="Actualiser depuis Supabase"
+          >
+            {loading ? "⏳" : "🔄"} Actualiser
+          </button>
           <Link
             href="/teacher/classes"
             className="inline-flex items-center gap-2 bg-white border border-slate-200 text-slate-700 font-semibold px-4 py-2.5 rounded-xl hover:border-indigo-300 hover:text-indigo-600 transition-colors text-sm"
@@ -103,6 +110,25 @@ export default function TeacherDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* Empty onboarding banner when teacher has 0 classes yet */}
+      {!loading && classes.length === 0 && (
+        <div className="mb-8 bg-indigo-50 border border-indigo-200 rounded-3xl p-8 text-center">
+          <div className="text-4xl mb-3">🏫</div>
+          <h2 className="text-xl font-extrabold text-slate-900 mb-2">
+            Bienvenue ! Créez votre première classe
+          </h2>
+          <p className="text-sm text-slate-600 max-w-lg mx-auto mb-6">
+            Une fois votre classe créée, un code d&apos;invitation unique (ex : <code className="font-mono bg-white px-1.5 py-0.5 rounded">PHY-2026-TS...</code>) sera généré automatiquement pour vos élèves. Dès qu&apos;ils s&apos;inscrivent et font des exercices, leurs résultats apparaîtront ici en temps réel.
+          </p>
+          <Link
+            href="/teacher/classes"
+            className="inline-flex items-center gap-2 bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700 shadow-md shadow-indigo-100 text-sm"
+          >
+            ➕ Créer ma première classe →
+          </Link>
+        </div>
+      )}
 
       {/* Multi-class quick switcher pills */}
       <div className="flex items-center gap-2 flex-wrap mb-7">
