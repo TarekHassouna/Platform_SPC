@@ -120,6 +120,11 @@ export default function ExerciseCatalogPage() {
                           🚫 Sans indices
                         </span>
                       )}
+                      {a.timeLimitMinutes && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                          ⏱️ {a.timeLimitMinutes} min
+                        </span>
+                      )}
                     </div>
                     <div className="text-sm font-bold text-slate-900 mt-0.5">{a.title}</div>
                   </div>

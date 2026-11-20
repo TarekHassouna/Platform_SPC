@@ -6,6 +6,19 @@ interface GeneratePayload {
   prompt: string;
   level: "Seconde" | "Première" | "Terminale";
   difficulty: "Guidé" | "Standard" | "Type Bac";
+  questionCount?: number;
+}
+
+function detectRequestedCount(prompt: string, explicitCount?: number): number {
+  if (typeof explicitCount === "number" && Number.isFinite(explicitCount)) {
+    return Math.min(15, Math.max(1, Math.round(explicitCount)));
+  }
+  const m = prompt.match(/\b(\d{1,2})\s*(?:questions?|qcm|items?|parties?)\b/i);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    if (n >= 1 && n <= 15) return n;
+  }
+  return 5;
 }
 
 export async function POST(req: NextRequest) {
@@ -24,8 +37,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const targetCount = detectRequestedCount(payload.prompt || "", payload.questionCount);
+
   const system =
-    "Tu es un professeur agrégé de Physique-Chimie qui conçoit des modèles d'exercices paramétrés pour le lycée français. " +
+    "Tu es un professeur agrégé de Physique-Chimie qui conçoit des modèles d'exercices et quiz paramétrés pour le lycée français. " +
+    `RÈGLE ABSOLUE : le tableau 'questions' DOIT contenir EXACTEMENT ${targetCount} questions progressives (ni plus, ni moins — ne t'arrête JAMAIS à 3 si ${targetCount} est demandé). ` +
     "Pour chaque question, rédige aussi un vrai 'hint' (indice pédagogique de 1 à 2 phrases qui guide l'élève sur la méthode ou la loi à utiliser SANS donner la réponse finale). " +
     "Retourne UNIQUEMENT un JSON valide avec cette structure exacte : " +
     '{"title":"...","domain":"Électricité|Mécanique|Chimie|Métrologie","chapter":"...","skills":["..."],"statement":"...avec {param}...","params":[{"name":"...","range":"...","unit":"..."}],"questions":[{"prompt":"...","type":"Expression|Grandeur|Texte libre","expected":"...","hint":"...","misconception":"..."}],"verificationChecks":["..."]}';
@@ -36,10 +52,10 @@ export async function POST(req: NextRequest) {
       messages: [
         {
           role: "user",
-          content: `Niveau : ${payload.level}. Style : ${payload.difficulty}. Demande enseignant : ${payload.prompt}`,
+          content: `Niveau : ${payload.level}. Style : ${payload.difficulty}. Nombre EXACT de questions exigé : ${targetCount}. Demande enseignant : ${payload.prompt}`,
         },
       ],
-      maxTokens: 1500,
+      maxTokens: Math.max(2200, targetCount * 420),
       jsonMode: true,
     });
 
@@ -54,9 +70,9 @@ export async function POST(req: NextRequest) {
               level: payload.level,
               difficulty: payload.difficulty,
               verificationChecks: parsed.verificationChecks || [
-                "50 tirages aléatoires vérifiés : aucune division par zéro",
+                `${parsed.questions.length} question(s) générées et structurées`,
                 "Unités SI cohérentes et plausibilité physique confirmée",
-                "En attente d'approbation enseignant avant publication",
+                "Modifiable librement avant publication",
               ],
             },
             provider: aiRes.provider,

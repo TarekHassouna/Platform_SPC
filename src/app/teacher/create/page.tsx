@@ -171,9 +171,20 @@ export default function TeacherCreateExercisePage() {
   const [prompt, setPrompt] = useState(PRESETS[0].prompt);
   const [level, setLevel] = useState<Level>("Terminale");
   const [difficulty, setDifficulty] = useState<"Guidé" | "Standard" | "Type Bac">("Type Bac");
+  const [questionCount, setQuestionCount] = useState<number>(5);
   const [isGenerating, setIsGenerating] = useState(false);
   const [draft, setDraft] = useState<DraftExercise | null>(null);
+  const [providerUsed, setProviderUsed] = useState<string | null>(null);
   const [publishedBanner, setPublishedBanner] = useState(false);
+
+  const handlePromptChange = (val: string) => {
+    setPrompt(val);
+    const m = val.match(/\b(\d{1,2})\s*(?:questions?|qcm|items?|parties?)\b/i);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n >= 1 && n <= 15) setQuestionCount(n);
+    }
+  };
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -182,24 +193,85 @@ export default function TeacherCreateExercisePage() {
       const res = await fetch("/api/exercises/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, level, difficulty }),
+        body: JSON.stringify({ prompt, level, difficulty, questionCount }),
       });
       const data = await res.json();
       if (data.draft) {
         setDraft(data.draft);
+        setProviderUsed(data.provider || "gemini");
         setIsGenerating(false);
         return;
       }
     } catch {
       // Fallback to structured template builder
     }
-    setDraft(buildDraftFromPrompt(prompt, level, difficulty));
+    const localDraft = buildDraftFromPrompt(prompt, level, difficulty);
+    // Pad local fallback if user asked for more than 3 questions
+    while (localDraft.questions.length < questionCount) {
+      const n = localDraft.questions.length + 1;
+      localDraft.questions.push({
+        prompt: `Question ${n} — Complète ton raisonnement physique et vérifie la cohérence des unités.`,
+        type: "Texte libre",
+        expected: "Justification physique rigoureuse appuyée sur les lois du chapitre.",
+        hint: "Rappelle la loi utilisée et vérifie les unités de chaque grandeur.",
+        misconception: "Réponse sans justification scientifique.",
+      });
+    }
+    if (localDraft.questions.length > questionCount) {
+      localDraft.questions = localDraft.questions.slice(0, questionCount);
+    }
+    setDraft(localDraft);
+    setProviderUsed("local_template");
     setIsGenerating(false);
   };
 
-  const handlePublish = () => {
+  const updateQuestion = (
+    idx: number,
+    patch: Partial<DraftExercise["questions"][number]>
+  ) => {
     if (!draft) return;
-    addExercise({
+    const updated = [...draft.questions];
+    updated[idx] = { ...updated[idx], ...patch };
+    setDraft({ ...draft, questions: updated });
+  };
+
+  const removeQuestion = (idx: number) => {
+    if (!draft || draft.questions.length <= 1) return;
+    setDraft({
+      ...draft,
+      questions: draft.questions.filter((_, i) => i !== idx),
+    });
+  };
+
+  const moveQuestion = (idx: number, dir: -1 | 1) => {
+    if (!draft) return;
+    const target = idx + dir;
+    if (target < 0 || target >= draft.questions.length) return;
+    const updated = [...draft.questions];
+    [updated[idx], updated[target]] = [updated[target], updated[idx]];
+    setDraft({ ...draft, questions: updated });
+  };
+
+  const addManualQuestion = () => {
+    if (!draft) return;
+    setDraft({
+      ...draft,
+      questions: [
+        ...draft.questions,
+        {
+          prompt: "",
+          type: "Expression",
+          expected: "",
+          hint: "",
+          misconception: "",
+        },
+      ],
+    });
+  };
+
+  const handlePublish = async () => {
+    if (!draft) return;
+    await addExercise({
       title: draft.title,
       level: draft.level,
       domain: draft.domain,
@@ -210,13 +282,15 @@ export default function TeacherCreateExercisePage() {
       version: "v1.0",
       skills: draft.skills,
       statement: draft.statement,
-      questions: draft.questions.map((q) => ({
-        prompt: q.prompt,
-        type: q.type,
-        expected: q.expected,
-        hint: q.hint,
-        misconception: q.misconception,
-      })),
+      questions: draft.questions
+        .filter((q) => q.prompt.trim().length > 0)
+        .map((q) => ({
+          prompt: q.prompt,
+          type: q.type,
+          expected: q.expected,
+          hint: q.hint,
+          misconception: q.misconception,
+        })),
     });
     setPublishedBanner(true);
     setTimeout(() => router.push("/teacher/exercises"), 1100);
@@ -274,13 +348,13 @@ export default function TeacherCreateExercisePage() {
               <textarea
                 rows={4}
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="ex : exercice type bac, chute libre avec frottements, difficile, 3 questions…"
+                onChange={(e) => handlePromptChange(e.target.value)}
+                placeholder="ex : quiz de 5 questions sur les dosages acido-basiques, niveau Terminale…"
                 className="w-full border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">Niveau</label>
                 <select
@@ -294,7 +368,7 @@ export default function TeacherCreateExercisePage() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Style / Difficulté</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Difficulté</label>
                 <select
                   value={difficulty}
                   onChange={(e) => setDifficulty(e.target.value as "Guidé" | "Standard" | "Type Bac")}
@@ -304,6 +378,19 @@ export default function TeacherCreateExercisePage() {
                   <option value="Standard">Standard</option>
                   <option value="Type Bac">Type Bac</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Questions</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={15}
+                  value={questionCount}
+                  onChange={(e) =>
+                    setQuestionCount(Math.min(15, Math.max(1, parseInt(e.target.value || "1", 10) || 1)))
+                  }
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-900 bg-white outline-none focus:border-indigo-400"
+                />
               </div>
             </div>
 
@@ -350,24 +437,44 @@ export default function TeacherCreateExercisePage() {
                   <span className="text-xs text-slate-400">{draft.level} · {draft.domain}</span>
                 </div>
                 <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
-                  ✓ Vérifié (50/50 tests)
+                  {providerUsed === "gemini" ? "✨ Généré par Gemini" : "✓ Modèle structuré"} · {draft.questions.length} question(s)
                 </span>
               </div>
 
-              {/* Editable title & statement */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1">Titre</label>
-                <input
-                  type="text"
-                  value={draft.title}
-                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm font-bold text-slate-900 bg-white outline-none focus:border-indigo-400"
-                />
+              {/* Editable title, domain, chapter & statement */}
+              <div className="grid sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-3">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Titre</label>
+                  <input
+                    type="text"
+                    value={draft.title}
+                    onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm font-bold text-slate-900 bg-white outline-none focus:border-indigo-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Domaine</label>
+                  <input
+                    type="text"
+                    value={draft.domain}
+                    onChange={(e) => setDraft({ ...draft, domain: e.target.value })}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 bg-white outline-none focus:border-indigo-400"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">Chapitre</label>
+                  <input
+                    type="text"
+                    value={draft.chapter}
+                    onChange={(e) => setDraft({ ...draft, chapter: e.target.value })}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-900 bg-white outline-none focus:border-indigo-400"
+                  />
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-500 mb-1">
-                  Énoncé (les variables entre accolades sont randomisées par élève)
+                  Énoncé (modifiable librement)
                 </label>
                 <textarea
                   rows={3}
@@ -378,52 +485,127 @@ export default function TeacherCreateExercisePage() {
               </div>
 
               {/* Parameters */}
-              <div>
-                <div className="text-xs font-semibold text-slate-500 mb-2">Paramètres aléatoires</div>
-                <div className="flex flex-wrap gap-2">
-                  {draft.params.map((p) => (
-                    <div key={p.name} className="bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-1.5 text-xs text-indigo-800 font-mono">
-                      <strong>{p.name}</strong> ∈ [{p.range}] {p.unit}
-                    </div>
-                  ))}
+              {draft.params && draft.params.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-2">Paramètres aléatoires</div>
+                  <div className="flex flex-wrap gap-2">
+                    {draft.params.map((p) => (
+                      <div key={p.name} className="bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-1.5 text-xs text-indigo-800 font-mono">
+                        <strong>{p.name}</strong> ∈ [{p.range}] {p.unit}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Questions & misconceptions */}
+              {/* Fully editable Questions */}
               <div>
-                <div className="text-xs font-semibold text-slate-500 mb-2">Questions &amp; erreurs détectées</div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-semibold text-slate-500">
+                    Questions ({draft.questions.length}) — Tout est modifiable avant publication
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addManualQuestion}
+                    className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-lg transition-colors"
+                  >
+                    + Ajouter une question
+                  </button>
+                </div>
                 <div className="space-y-3">
                   {draft.questions.map((q, idx) => (
-                    <div key={idx} className="border border-slate-100 rounded-2xl p-4 bg-slate-50/70">
-                      <div className="flex items-center justify-between gap-2 mb-1.5">
-                        <span className="text-sm font-semibold text-slate-900">
-                          {idx + 1}. {q.prompt}
-                        </span>
-                        <span className="text-[11px] font-bold bg-white border border-slate-200 text-slate-600 px-2 py-0.5 rounded-lg shrink-0">
-                          {q.type}
-                        </span>
+                    <div key={idx} className="border border-slate-200 rounded-2xl p-4 bg-slate-50/70 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-extrabold text-indigo-700">Question {idx + 1}</span>
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={q.type}
+                            onChange={(e) => updateQuestion(idx, { type: e.target.value })}
+                            className="text-[11px] font-bold bg-white border border-slate-200 text-slate-700 px-2 py-1 rounded-lg outline-none focus:border-indigo-400"
+                          >
+                            <option value="Expression">Expression</option>
+                            <option value="Grandeur">Grandeur</option>
+                            <option value="Texte libre">Texte libre</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => moveQuestion(idx, -1)}
+                            disabled={idx === 0}
+                            title="Monter"
+                            className="text-xs px-1.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 disabled:opacity-30"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveQuestion(idx, 1)}
+                            disabled={idx === draft.questions.length - 1}
+                            title="Descendre"
+                            className="text-xs px-1.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 disabled:opacity-30"
+                          >
+                            ↓
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeQuestion(idx)}
+                            disabled={draft.questions.length <= 1}
+                            title="Supprimer cette question"
+                            className="text-xs px-1.5 py-1 rounded-lg bg-white border border-rose-200 text-rose-500 hover:bg-rose-50 disabled:opacity-30"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       </div>
-                      <div className="text-xs text-emerald-700 font-mono mb-1">
-                        ✓ Attendu : {q.expected}
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-500 mb-1">Énoncé de la question</label>
+                        <textarea
+                          rows={2}
+                          value={q.prompt}
+                          onChange={(e) => updateQuestion(idx, { prompt: e.target.value })}
+                          placeholder="Rédigez ou modifiez la question…"
+                          className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm font-medium text-slate-900 bg-white outline-none focus:border-indigo-400"
+                        />
                       </div>
-                      <div className="mt-2 mb-1.5">
-                        <label className="block text-[11px] font-semibold text-indigo-700 mb-1">
-                          💡 Indice élève (modifiable)
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-emerald-700 mb-1">
+                          ✓ Réponse attendue / barème
                         </label>
                         <input
                           type="text"
-                          value={q.hint || ""}
-                          onChange={(e) => {
-                            const updated = [...draft.questions];
-                            updated[idx] = { ...updated[idx], hint: e.target.value };
-                            setDraft({ ...draft, questions: updated });
-                          }}
-                          placeholder="Indice pédagogique guidant la méthode sans donner la réponse…"
-                          className="w-full border border-indigo-100 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 bg-white outline-none focus:border-indigo-400"
+                          value={q.expected}
+                          onChange={(e) => updateQuestion(idx, { expected: e.target.value })}
+                          placeholder="ex : U = R * I, 0.25 A, ou points clés du barème…"
+                          className="w-full border border-emerald-200 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-900 bg-white outline-none focus:border-emerald-400"
                         />
                       </div>
-                      <div className="text-xs text-rose-600">
-                        ⚠️ Erreur surveillée : {q.misconception}
+
+                      <div className="grid sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-indigo-700 mb-1">
+                            💡 Indice élève
+                          </label>
+                          <input
+                            type="text"
+                            value={q.hint || ""}
+                            onChange={(e) => updateQuestion(idx, { hint: e.target.value })}
+                            placeholder="Indice guidant la méthode…"
+                            className="w-full border border-indigo-100 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 bg-white outline-none focus:border-indigo-400"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-rose-600 mb-1">
+                            ⚠️ Erreur surveillée
+                          </label>
+                          <input
+                            type="text"
+                            value={q.misconception || ""}
+                            onChange={(e) => updateQuestion(idx, { misconception: e.target.value })}
+                            placeholder="Erreur classique des élèves…"
+                            className="w-full border border-rose-100 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 bg-white outline-none focus:border-rose-400"
+                          />
+                        </div>
                       </div>
                     </div>
                   ))}

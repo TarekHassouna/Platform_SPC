@@ -50,6 +50,7 @@ export interface ClassAssignmentRow {
   mode: string;
   allowRetry: boolean;
   allowHints: boolean;
+  timeLimitMinutes: number | null;
   dueAt: string | null;
   targetExerciseId?: string;
 }
@@ -301,6 +302,10 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
       const isGraded = a.mode === "graded";
       const allowRetry = typeof a.allow_retry === "boolean" ? a.allow_retry : !isGraded;
       const allowHints = typeof a.allow_hints === "boolean" ? a.allow_hints : !isGraded;
+      const timeLimitMinutes =
+        typeof a.time_limit_minutes === "number" && a.time_limit_minutes > 0
+          ? a.time_limit_minutes
+          : null;
 
       return {
         id: String(a.id),
@@ -309,6 +314,7 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
         mode: isGraded ? "Noté" : "Entraînement",
         allowRetry,
         allowHints,
+        timeLimitMinutes,
         dueAt: a.due_at ? String(a.due_at) : null,
         targetExerciseId,
       };
@@ -679,6 +685,7 @@ export async function fetchAssignmentPolicyAndAttempt(
   mode: "Noté" | "Entraînement";
   allowRetry: boolean;
   allowHints: boolean;
+  timeLimitMinutes: number | null;
   previousAttempt?: {
     answers: Record<string, string>;
     score: number;
@@ -700,6 +707,10 @@ export async function fetchAssignmentPolicyAndAttempt(
   const isGraded = asg.mode === "graded";
   const allowRetry = typeof asg.allow_retry === "boolean" ? asg.allow_retry : !isGraded;
   const allowHints = typeof asg.allow_hints === "boolean" ? asg.allow_hints : !isGraded;
+  const timeLimitMinutes =
+    typeof asg.time_limit_minutes === "number" && asg.time_limit_minutes > 0
+      ? asg.time_limit_minutes
+      : null;
 
   let previousAttempt: {
     answers: Record<string, string>;
@@ -736,6 +747,7 @@ export async function fetchAssignmentPolicyAndAttempt(
     mode: isGraded ? "Noté" : "Entraînement",
     allowRetry,
     allowHints,
+    timeLimitMinutes,
     previousAttempt,
   };
 }

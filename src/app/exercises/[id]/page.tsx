@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -77,11 +77,17 @@ function ExerciseRunnerContent() {
   // Teacher-controlled policies for assignments
   const [allowRetry, setAllowRetry] = useState(true);
   const [allowHints, setAllowHints] = useState(true);
+  const [timeLimitMinutes, setTimeLimitMinutes] = useState<number | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const [timeExpired, setTimeExpired] = useState(false);
   const [lockedAttemptInfo, setLockedAttemptInfo] = useState<{
     score: number;
     maxScore: number;
     submittedAt: string;
   } | null>(null);
+
+  const answersRef = useRef<Record<string, string>>({});
+  const autoSubmittedRef = useRef(false);
 
   const [seed, setSeed] = useState(0);
 
@@ -185,7 +191,22 @@ function ExerciseRunnerContent() {
   const [tutorInput, setTutorInput] = useState("");
   const [tutorLoading, setTutorLoading] = useState(false);
 
-  // Check teacher retry policy & prior submission if this exercise is opened from an assignment
+  // Keep ref in sync + auto-save typed answers locally during timed exams so a refresh never loses work
+  const timerKey = assignmentId ? `spc_timer_${assignmentId}_${user?.id || "anon"}` : null;
+  const draftKey = assignmentId ? `spc_draft_${assignmentId}_${user?.id || "anon"}` : null;
+
+  useEffect(() => {
+    answersRef.current = answers;
+    if (draftKey && !submitted && Object.keys(answers).length > 0) {
+      try {
+        window.localStorage.setItem(draftKey, JSON.stringify(answers));
+      } catch {
+        // ignore storage quota
+      }
+    }
+  }, [answers, draftKey, submitted]);
+
+  // Check teacher policies (retry, hints, timer) & prior submission if opened from an assignment
   useEffect(() => {
     if (!assignmentId) return;
     let active = true;
@@ -193,6 +214,7 @@ function ExerciseRunnerContent() {
       if (!active || !policy) return;
       setAllowRetry(policy.allowRetry);
       setAllowHints(policy.allowHints);
+      setTimeLimitMinutes(policy.timeLimitMinutes);
       if (!policy.allowRetry && policy.previousAttempt) {
         setAnswers(policy.previousAttempt.answers);
         setSubmitted(true);
@@ -201,77 +223,143 @@ function ExerciseRunnerContent() {
           maxScore: policy.previousAttempt.maxScore,
           submittedAt: policy.previousAttempt.submittedAt,
         });
+      } else if (draftKey) {
+        // Restore any in-progress draft if student accidentally refreshed during a timed exam
+        try {
+          const savedDraft = window.localStorage.getItem(draftKey);
+          if (savedDraft) {
+            const parsed = JSON.parse(savedDraft);
+            if (parsed && typeof parsed === "object") {
+              setAnswers(parsed);
+            }
+          }
+        } catch {
+          // ignore
+        }
       }
     });
     return () => {
       active = false;
     };
-  }, [assignmentId, user?.id]);
+  }, [assignmentId, user?.id, draftKey]);
 
-  const handleSubmit = async () => {
-    if (!activeExercise) return;
-    setChecking(true);
-    const results: Record<string, EvalResult> = {};
+  const submitAnswers = useCallback(
+    async (answersToSubmit: Record<string, string>, fromTimer = false) => {
+      if (!activeExercise || checking) return;
+      setChecking(true);
+      if (fromTimer) {
+        setTimeExpired(true);
+        setSubmitted(true);
+      }
 
-    await Promise.all(
-      activeExercise.questions.map(async (q) => {
-        const res = await fetch("/api/evaluate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            question_type: q.type,
-            question_prompt: q.prompt,
-            student_answer: answers[q.id] || "",
-            expected: q.expected,
-            unit: q.unit,
-            sig_figs: q.sig_figs,
-            target_symbol: q.target_symbol,
-            misconceptions: q.misconceptions || [],
-          }),
+      const results: Record<string, EvalResult> = {};
+
+      await Promise.all(
+        activeExercise.questions.map(async (q) => {
+          const res = await fetch("/api/evaluate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question_type: q.type,
+              question_prompt: q.prompt,
+              student_answer: answersToSubmit[q.id] || "",
+              expected: q.expected,
+              unit: q.unit,
+              sig_figs: q.sig_figs,
+              target_symbol: q.target_symbol,
+              misconceptions: q.misconceptions || [],
+            }),
+          });
+          results[q.id] = await res.json();
+        })
+      );
+
+      setFeedback(results);
+      setSubmitted(true);
+      setChecking(false);
+
+      // Clear local exam timer & draft once submitted
+      try {
+        if (timerKey) window.localStorage.removeItem(timerKey);
+        if (draftKey) window.localStorage.removeItem(draftKey);
+      } catch {
+        // ignore
+      }
+
+      if (user?.id) {
+        const vals = Object.values(results);
+        const sumScore = vals.reduce((a, r) => a + r.score, 0);
+        const overallStatus =
+          sumScore >= activeExercise.questions.length * 0.95
+            ? "correct"
+            : sumScore > 0
+            ? "partially_correct"
+            : "incorrect";
+
+        const errors = vals
+          .filter((r) => r.error_code)
+          .map((r) => ({
+            code: r.error_code!,
+            category: r.error_category || "Physique-Chimie",
+            evidence: r.explanation,
+          }));
+
+        await recordExerciseSubmission({
+          studentId: user.id,
+          assignmentId,
+          exerciseId: activeExercise.id,
+          exerciseTitle: activeExercise.title,
+          conceptCodes: activeExercise.conceptCodes,
+          renderedParams: { ...activeExercise.params, autoClosedByTimer: fromTimer },
+          rawAnswers: answersToSubmit,
+          score: sumScore,
+          maxScore: Math.max(activeExercise.questions.length, 1),
+          status: overallStatus,
+          engine: vals[0]?.engine || "ts_fallback",
+          errors,
         });
-        results[q.id] = await res.json();
-      })
-    );
+        setSavedToDb(true);
+      }
+    },
+    [activeExercise, checking, user?.id, assignmentId, timerKey, draftKey]
+  );
 
-    setFeedback(results);
-    setSubmitted(true);
-    setChecking(false);
+  const handleSubmit = () => submitAnswers(answers, false);
 
-    if (user?.id) {
-      const vals = Object.values(results);
-      const sumScore = vals.reduce((a, r) => a + r.score, 0);
-      const overallStatus =
-        sumScore >= activeExercise.questions.length * 0.95
-          ? "correct"
-          : sumScore > 0
-          ? "partially_correct"
-          : "incorrect";
-
-      const errors = vals
-        .filter((r) => r.error_code)
-        .map((r) => ({
-          code: r.error_code!,
-          category: r.error_category || "Physique-Chimie",
-          evidence: r.explanation,
-        }));
-
-      await recordExerciseSubmission({
-        studentId: user.id,
-        assignmentId,
-        exerciseId: activeExercise.id,
-        exerciseTitle: activeExercise.title,
-        conceptCodes: activeExercise.conceptCodes,
-        renderedParams: activeExercise.params,
-        rawAnswers: answers,
-        score: sumScore,
-        maxScore: Math.max(activeExercise.questions.length, 1),
-        status: overallStatus,
-        engine: vals[0]?.engine || "ts_fallback",
-        errors,
-      });
-      setSavedToDb(true);
+  // Countdown timer effect for timed quizzes/exams: auto-closes and saves student work at 00:00
+  useEffect(() => {
+    if (!timeLimitMinutes || timeLimitMinutes <= 0 || submitted || !activeExercise || !timerKey) {
+      return;
     }
-  };
+
+    let endAt = Date.now() + timeLimitMinutes * 60 * 1000;
+    try {
+      const existing = window.localStorage.getItem(timerKey);
+      if (existing) {
+        const parsed = parseInt(existing, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          endAt = parsed;
+        }
+      } else {
+        window.localStorage.setItem(timerKey, String(endAt));
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+      if (remaining <= 0 && !autoSubmittedRef.current) {
+        autoSubmittedRef.current = true;
+        void submitAnswers(answersRef.current, true);
+      }
+    };
+
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [timeLimitMinutes, submitted, activeExercise, timerKey, submitAnswers]);
 
   const handleToggleHint = async (q: NormalizedQuestion) => {
     if (!allowHints || !activeExercise) return;
@@ -313,10 +401,18 @@ function ExerciseRunnerContent() {
   const resetWithNewValues = () => {
     setSeed((s) => s + 1);
     setSubmitted(false);
+    setTimeExpired(false);
+    autoSubmittedRef.current = false;
     setFeedback({});
     setAnswers({});
     setRevealedHints({});
     setSavedToDb(false);
+    try {
+      if (timerKey) window.localStorage.removeItem(timerKey);
+      if (draftKey) window.localStorage.removeItem(draftKey);
+    } catch {
+      // ignore
+    }
   };
 
   const sendTutorMessage = async () => {
@@ -418,6 +514,15 @@ function ExerciseRunnerContent() {
     CURRICULUM_EXERCISES.length;
   const nextExercise = CURRICULUM_EXERCISES[nextExerciseIdx];
 
+  const formatCountdown = (totalSec: number) => {
+    const hrs = Math.floor(totalSec / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    const secs = totalSec % 60;
+    const mm = String(mins).padStart(2, "0");
+    const ss = String(secs).padStart(2, "0");
+    return hrs > 0 ? `${hrs}:${mm}:${ss}` : `${mm}:${ss}`;
+  };
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-100 px-6 py-3 flex items-center gap-4 sticky top-0 z-20">
@@ -434,6 +539,20 @@ function ExerciseRunnerContent() {
           <span className="font-semibold text-slate-700">{activeExercise.chapter}</span>
         </div>
         <div className="ml-auto flex items-center gap-2.5">
+          {timeLimitMinutes && secondsLeft !== null && !submitted && (
+            <div
+              className={`text-xs font-mono font-extrabold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 ${
+                secondsLeft <= 60
+                  ? "bg-rose-600 text-white border-rose-700 animate-pulse"
+                  : secondsLeft <= 120
+                  ? "bg-amber-100 text-amber-900 border-amber-300"
+                  : "bg-violet-50 text-violet-800 border-violet-200"
+              }`}
+            >
+              <span>⏱️</span>
+              <span>{formatCountdown(secondsLeft)}</span>
+            </div>
+          )}
           {activeExercise.lessonContent && (
             <button
               onClick={() => setShowLesson(!showLesson)}
@@ -459,6 +578,15 @@ function ExerciseRunnerContent() {
 
       <div className="max-w-6xl mx-auto p-6 lg:p-10 flex flex-col lg:flex-row gap-8">
         <div className="flex-1 min-w-0">
+          {timeExpired && (
+            <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-900 rounded-2xl p-4 text-sm font-semibold flex items-center gap-3">
+              <span className="text-xl">⏱️</span>
+              <div>
+                <strong>Temps écoulé !</strong> L&apos;examen s&apos;est clôturé automatiquement et toutes tes réponses saisies ont été corrigées et enregistrées.
+              </div>
+            </div>
+          )}
+
           {showLesson && activeExercise.lessonContent && (
             <div className="bg-indigo-50/70 border border-indigo-200 rounded-3xl p-6 mb-6 space-y-3 text-sm text-slate-700">
               <div className="font-extrabold text-indigo-900">📖 Rappel : {activeExercise.lessonTitle}</div>

@@ -280,6 +280,11 @@ export default function DashboardPage() {
                               🚫 Sans indices
                             </span>
                           )}
+                          {asg.timeLimitMinutes && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                              ⏱️ {asg.timeLimitMinutes} min
+                            </span>
+                          )}
                         </div>
                         <div className="font-bold text-slate-900">{asg.title}</div>
                       </div>

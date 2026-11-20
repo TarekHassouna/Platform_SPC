@@ -13,6 +13,7 @@ export default function TeacherExercisesPage() {
     addAssignment,
     toggleAssignmentRetry,
     toggleAssignmentHints,
+    updateAssignmentTimeLimit,
   } = useTeacherStore();
 
   const [tab, setTab] = useState<"library" | "assignments">("library");
@@ -30,6 +31,7 @@ export default function TeacherExercisesPage() {
   const [assignMode, setAssignMode] = useState<"Entraînement" | "Noté">("Entraînement");
   const [assignAllowRetry, setAssignAllowRetry] = useState<boolean>(true);
   const [assignAllowHints, setAssignAllowHints] = useState<boolean>(true);
+  const [assignTimeLimit, setAssignTimeLimit] = useState<string>("");
   const [toast, setToast] = useState<string | null>(null);
 
   const filteredExercises = exercises.filter((ex) => {
@@ -59,6 +61,7 @@ export default function TeacherExercisesPage() {
   const handleAssignSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!assigningEx || !targetClassId) return;
+    const parsedMinutes = parseInt(assignTimeLimit, 10);
     await addAssignment({
       title: assignTitle || assigningEx.title,
       classId: targetClassId,
@@ -67,6 +70,8 @@ export default function TeacherExercisesPage() {
       mode: assignMode,
       allowRetry: assignAllowRetry,
       allowHints: assignAllowHints,
+      timeLimitMinutes:
+        Number.isFinite(parsedMinutes) && parsedMinutes > 0 ? parsedMinutes : null,
     });
     const clsName = classes.find((c) => c.id === targetClassId)?.name || "la classe";
     setAssigningEx(null);
@@ -278,6 +283,35 @@ export default function TeacherExercisesPage() {
                       >
                         {asg.allowHints ? "💡 Indices autorisés" : "🚫 Sans indices"}
                       </button>
+                      <select
+                        value={asg.timeLimitMinutes ? String(asg.timeLimitMinutes) : ""}
+                        onChange={(e) => {
+                          const v = parseInt(e.target.value, 10);
+                          updateAssignmentTimeLimit(asg.id, Number.isFinite(v) && v > 0 ? v : null);
+                        }}
+                        title="Durée chronométrée de l'examen"
+                        className={`text-xs font-semibold px-2 py-0.5 rounded-lg border outline-none cursor-pointer ${
+                          asg.timeLimitMinutes
+                            ? "bg-violet-50 text-violet-700 border-violet-200"
+                            : "bg-slate-50 text-slate-500 border-slate-200"
+                        }`}
+                      >
+                        <option value="">∞ Sans chronomètre</option>
+                        <option value="2">⏱️ 2 min (test)</option>
+                        <option value="5">⏱️ 5 min</option>
+                        <option value="10">⏱️ 10 min</option>
+                        <option value="15">⏱️ 15 min</option>
+                        <option value="20">⏱️ 20 min</option>
+                        <option value="30">⏱️ 30 min</option>
+                        <option value="45">⏱️ 45 min</option>
+                        <option value="60">⏱️ 60 min</option>
+                        {asg.timeLimitMinutes &&
+                          ![2, 5, 10, 15, 20, 30, 45, 60].includes(asg.timeLimitMinutes) && (
+                            <option value={String(asg.timeLimitMinutes)}>
+                              ⏱️ {asg.timeLimitMinutes} min
+                            </option>
+                          )}
+                      </select>
                       <span className="text-xs text-slate-400">Échéance : {asg.dueDate}</span>
                     </div>
                     <h3 className="font-bold text-slate-900">{asg.title}</h3>
@@ -413,6 +447,52 @@ export default function TeacherExercisesPage() {
                   </div>
                 </div>
               </label>
+
+              {/* Teacher timer control */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-slate-900">
+                    ⏱️ Chronomètre (minutes) — optionnel
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={180}
+                    value={assignTimeLimit}
+                    onChange={(e) => setAssignTimeLimit(e.target.value)}
+                    placeholder="Illimité"
+                    className="w-24 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-900 bg-white outline-none focus:border-indigo-400 text-center"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { label: "Illimité", val: "" },
+                    { label: "5 min", val: "5" },
+                    { label: "15 min", val: "15" },
+                    { label: "30 min", val: "30" },
+                    { label: "45 min", val: "45" },
+                    { label: "60 min", val: "60" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => setAssignTimeLimit(opt.val)}
+                      className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                        assignTimeLimit === opt.val
+                          ? "bg-indigo-600 text-white border-indigo-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-indigo-300"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {assignTimeLimit && parseInt(assignTimeLimit, 10) > 0
+                    ? `À la fin des ${assignTimeLimit} min, le quiz se ferme automatiquement et sauvegarde tout ce que l'élève a déjà répondu.`
+                    : "L'élève dispose d'un temps illimité."}
+                </div>
+              </div>
 
               <div className="flex gap-3 pt-2">
                 <button
