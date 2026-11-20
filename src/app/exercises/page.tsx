@@ -96,12 +96,27 @@ export default function ExerciseCatalogPage() {
               {assignments.map((a) => (
                 <Link
                   key={a.id}
-                  href={a.targetExerciseId ? `/exercises/${a.targetExerciseId}` : "/exercises"}
+                  href={
+                    a.targetExerciseId
+                      ? `/exercises/${a.targetExerciseId}?assignmentId=${a.id}`
+                      : "/exercises"
+                  }
                   className="bg-white rounded-2xl p-4 border border-indigo-100 hover:border-indigo-300 flex items-center justify-between gap-3 transition-all"
                 >
                   <div>
-                    <div className="text-xs font-bold text-indigo-600">{a.className} · {a.mode}</div>
-                    <div className="text-sm font-bold text-slate-900">{a.title}</div>
+                    <div className="text-xs font-bold text-indigo-600 flex items-center gap-2 flex-wrap">
+                      <span>{a.className} · {a.mode}</span>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full ${
+                          a.allowRetry
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {a.allowRetry ? "🔄 Réessais autorisés" : "🔒 1 seul essai"}
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 mt-0.5">{a.title}</div>
                   </div>
                   <span className="text-xs font-bold text-indigo-600 shrink-0">Faire →</span>
                 </Link>

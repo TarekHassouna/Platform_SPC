@@ -60,6 +60,7 @@ export interface AssignmentItem {
   exerciseIds: string[];
   dueDate: string;
   mode: "Entraînement" | "Noté";
+  allowRetry: boolean;
   completedCount: number;
   totalStudents: number;
 }
@@ -383,13 +384,16 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
       // 4. Load teacher's real assignments from Supabase
       const { data: dbAssignments } = await supabase
         .from("assignments")
-        .select("id, title, class_id, mode, due_at, created_at")
+        .select("*")
         .eq("teacher_id", user.id)
         .order("created_at", { ascending: false });
 
       setAssignments(
         (dbAssignments || []).map((a: Record<string, unknown>) => {
           const cls = mappedClasses.find((c) => c.id === String(a.class_id));
+          const isGraded = a.mode === "graded";
+          const allowRetry =
+            typeof a.allow_retry === "boolean" ? a.allow_retry : !isGraded;
           return {
             id: String(a.id),
             title: String(a.title),
@@ -398,7 +402,8 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
             dueDate: a.due_at
               ? new Date(String(a.due_at)).toLocaleDateString("fr-FR")
               : "Sans date limite",
-            mode: a.mode === "graded" ? "Noté" : "Entraînement",
+            mode: isGraded ? "Noté" : "Entraînement",
+            allowRetry,
             completedCount: 0,
             totalStudents: cls?.students.length || 0,
           };
@@ -602,18 +607,29 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     }
 
     if (isSupabaseConfigured && supabase && user?.id) {
-      const { data } = await supabase
+      const basePayload = {
+        class_id: asg.classId,
+        teacher_id: user.id,
+        title: asg.title,
+        exercise_version_ids: versionIds,
+        mode: asg.mode === "Noté" ? "graded" : "practice",
+      };
+      const firstTry = await supabase
         .from("assignments")
-        .insert({
-          class_id: asg.classId,
-          teacher_id: user.id,
-          title: asg.title,
-          exercise_version_ids: versionIds,
-          mode: asg.mode === "Noté" ? "graded" : "practice",
-        })
+        .insert({ ...basePayload, allow_retry: asg.allowRetry })
         .select("id")
         .single();
-      if (data?.id) newId = data.id;
+
+      if (firstTry.data?.id) {
+        newId = firstTry.data.id;
+      } else if (firstTry.error?.message?.includes("allow_retry")) {
+        const retryInsert = await supabase
+          .from("assignments")
+          .insert(basePayload)
+          .select("id")
+          .single();
+        if (retryInsert.data?.id) newId = retryInsert.data.id;
+      }
     }
 
     const created: AssignmentItem = {

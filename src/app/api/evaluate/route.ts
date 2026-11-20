@@ -136,13 +136,18 @@ function fallbackEvaluate(body: EvaluatePayload) {
     const stripTarget = (s: string) => {
       if (target && s.startsWith(`${target}=`)) return s.slice(target.length + 1);
       if (target && s.endsWith(`=${target}`)) return s.slice(0, -(target.length + 1));
+      // Also strip generic LHS like "n_i(acide)=" or "v(t)=" when expected has one
+      if (s.includes("=")) {
+        const parts = s.split("=");
+        if (parts.length === 2) return parts[1];
+      }
       return s;
     };
 
     const studentRhs = stripTarget(compact);
     const expectedRhs = stripTarget(expectedCompact);
 
-    if (studentRhs === expectedRhs) {
+    if (compact === expectedCompact || studentRhs === expectedRhs) {
       return {
         status: "correct",
         score: 1,
@@ -390,6 +395,17 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Auto-detect when an AI-generated "Grandeur" question actually expects a symbolic formula (e.g., "n_i(acide) = C * V_A")
+  if (body.question_type === "quantity") {
+    const normExp = normalize(body.expected || "");
+    const looksPureNumber = /^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?\s*[a-zA-Z°µΩ/·^0-9-]*$/.test(
+      normExp
+    ) && !/[=]/.test(normExp) && /^\s*[+-]?\d/.test(normExp);
+    if (!looksPureNumber) {
+      body = { ...body, question_type: "expression" };
+    }
+  }
+
   const serviceUrl = process.env.EVALUATION_SERVICE_URL || "http://127.0.0.1:8000";
 
   // Try real Python FastAPI (SymPy + Pint) evaluation microservice first
@@ -412,5 +428,54 @@ export async function POST(req: NextRequest) {
     // Microservice offline — seamlessly use built-in fallback evaluator
   }
 
-  return NextResponse.json(fallbackEvaluate(body));
+  const result = fallbackEvaluate(body);
+
+  // If deterministic expression comparison didn't match (and wasn't a known misconception),
+  // verify algebraic/physical equivalence via AI (handles rearranged forms, dx/Vdt vs (1/V)*(dx/dt), etc.)
+  if (
+    body.question_type === "expression" &&
+    result.status === "incorrect" &&
+    result.error_code === "expression_incorrecte"
+  ) {
+    const aiCheck = await callTextAI({
+      system:
+        "Tu es un moteur de vérification d'équivalence algébrique et physique (Physique-Chimie lycée français). " +
+        "Compare la formule de l'élève à la formule attendue. " +
+        "RÈGLES : " +
+        "1) Accepte toute écriture mathématiquement/physiquement équivalente (ex: C*V_A == V_A*C, dx/(V*dt) == (1/V)*(dx/dt), multiplication implicite, espaces, casse mineure comme v vs V si non ambiguë). " +
+        "2) Si l'élève écrit un raccourci courant physiquement juste mais avec une petite imprécision de parenthèses ou de casse (ex: dx/vdt pour (1/V)*(dx/dt)), accorde 'correct' (score 1.0) ou 'partially_correct' (score 0.9) avec un conseil gentil de rigueur. " +
+        "3) Marque 'incorrect' (score 0.0) UNIQUEMENT si la physique/l'algèbre est réellement fausse (formule inversée, signe faux, variable manquante ou erronée). " +
+        'Retourne UNIQUEMENT un JSON valide : {"status":"correct"|"partially_correct"|"incorrect","score":0.0..1.0,"error_code":null|"formule_inversee"|"erreur_notation"|"expression_incorrecte","error_category":null|"Algébrique"|"Communication"|"Sélection de formule","explanation":"explication courte et claire en français"}',
+      messages: [
+        {
+          role: "user",
+          content: `Question : ${body.question_prompt || ""}\nFormule attendue : ${body.expected}\nRéponse de l'élève : ${body.student_answer}`,
+        },
+      ],
+      maxTokens: 280,
+    });
+
+    if (aiCheck?.text) {
+      const m = aiCheck.text.match(/\{[\s\S]*\}/);
+      if (m) {
+        try {
+          const parsed = JSON.parse(m[0]);
+          return NextResponse.json({
+            status: parsed.status || result.status,
+            score: Math.min(1, Math.max(0, Number(parsed.score ?? result.score))),
+            max_score: 1,
+            error_code: parsed.error_code || undefined,
+            error_category: parsed.error_category || undefined,
+            explanation: parsed.explanation || result.explanation,
+            expected_display: body.expected,
+            engine: `algebra_ai_${aiCheck.provider}`,
+          });
+        } catch {
+          // keep deterministic result
+        }
+      }
+    }
+  }
+
+  return NextResponse.json(result);
 }

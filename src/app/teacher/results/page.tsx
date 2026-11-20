@@ -115,19 +115,25 @@ export default function TeacherResultsPage() {
                         </div>
                       </td>
                       {activeClass.skills.map((skill) => {
-                        const val = stu.skills[skill] ?? 50;
+                        const val = stu.skills[skill];
                         return (
                           <td key={skill} className="py-2.5 px-2 text-center">
-                            <span
-                              className={`inline-block w-14 py-1.5 rounded-xl text-xs border ${cellStyle(val)}`}
-                            >
-                              {val}%
-                            </span>
+                            {val === undefined ? (
+                              <span className="inline-block w-14 py-1.5 rounded-xl text-xs border bg-slate-50 text-slate-400 border-slate-200">
+                                —
+                              </span>
+                            ) : (
+                              <span
+                                className={`inline-block w-14 py-1.5 rounded-xl text-xs border ${cellStyle(val)}`}
+                              >
+                                {val}%
+                              </span>
+                            )}
                           </td>
                         );
                       })}
                       <td className="py-3.5 px-4 text-center font-extrabold text-sm text-slate-800">
-                        {stu.accuracy}%
+                        {stu.exercisesDone > 0 ? `${stu.accuracy}%` : "—"}
                       </td>
                     </tr>
                   ))}
@@ -138,13 +144,18 @@ export default function TeacherResultsPage() {
                       Action remédiation
                     </td>
                     {activeClass.skills.map((skill) => {
-                      const strugglingStudents = activeClass.students.filter(
-                        (s) => (s.skills[skill] ?? 50) < 55
+                      const evaluatedStudents = activeClass.students.filter(
+                        (s) => s.skills[skill] !== undefined
+                      );
+                      const strugglingStudents = evaluatedStudents.filter(
+                        (s) => (s.skills[skill] ?? 100) < 55
                       );
                       const sent = remediatedSkills.includes(`${activeClass.id}-${skill}`);
                       return (
                         <td key={skill} className="py-3 px-2 text-center">
-                          {strugglingStudents.length > 0 ? (
+                          {evaluatedStudents.length === 0 ? (
+                            <span className="text-[11px] text-slate-400">Non évalué</span>
+                          ) : strugglingStudents.length > 0 ? (
                             <button
                               onClick={() => handleRemediation(skill, strugglingStudents.length)}
                               disabled={sent}

@@ -1,10 +1,11 @@
 "use client";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getExerciseById, CURRICULUM_EXERCISES } from "@/lib/curriculum-bank";
 import {
+  fetchAssignmentPolicyAndAttempt,
   fetchDatabaseExercise,
   recordExerciseSubmission,
   type DatabaseExerciseRecord,
@@ -61,15 +62,25 @@ function mapDbQuestionType(rawType: string): "expression" | "quantity" | "free_t
 
 function ExerciseRunnerContent() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const { user, logout } = useAuth();
 
   const exerciseId = String(params?.id || "");
+  const assignmentId = searchParams.get("assignmentId") || undefined;
   const officialTemplate = getExerciseById(exerciseId);
 
   const [dbExercise, setDbExercise] = useState<DatabaseExerciseRecord | null>(null);
   const [loadingDb, setLoadingDb] = useState(!officialTemplate);
   const [notFound, setNotFound] = useState(false);
+
+  // Teacher-controlled retry policy for assignments
+  const [allowRetry, setAllowRetry] = useState(true);
+  const [lockedAttemptInfo, setLockedAttemptInfo] = useState<{
+    score: number;
+    maxScore: number;
+    submittedAt: string;
+  } | null>(null);
 
   const [seed, setSeed] = useState(0);
 
@@ -173,6 +184,28 @@ function ExerciseRunnerContent() {
   const [tutorInput, setTutorInput] = useState("");
   const [tutorLoading, setTutorLoading] = useState(false);
 
+  // Check teacher retry policy & prior submission if this exercise is opened from an assignment
+  useEffect(() => {
+    if (!assignmentId) return;
+    let active = true;
+    fetchAssignmentPolicyAndAttempt(assignmentId, user?.id).then((policy) => {
+      if (!active || !policy) return;
+      setAllowRetry(policy.allowRetry);
+      if (!policy.allowRetry && policy.previousAttempt) {
+        setAnswers(policy.previousAttempt.answers);
+        setSubmitted(true);
+        setLockedAttemptInfo({
+          score: policy.previousAttempt.score,
+          maxScore: policy.previousAttempt.maxScore,
+          submittedAt: policy.previousAttempt.submittedAt,
+        });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [assignmentId, user?.id]);
+
   const handleSubmit = async () => {
     if (!activeExercise) return;
     setChecking(true);
@@ -222,6 +255,7 @@ function ExerciseRunnerContent() {
 
       await recordExerciseSubmission({
         studentId: user.id,
+        assignmentId,
         exerciseId: activeExercise.id,
         exerciseTitle: activeExercise.title,
         conceptCodes: activeExercise.conceptCodes,
@@ -420,7 +454,7 @@ function ExerciseRunnerContent() {
                   )}
                 </div>
               </div>
-              {activeExercise.isRandomizable && (
+              {activeExercise.isRandomizable && allowRetry && (
                 <button
                   onClick={resetWithNewValues}
                   className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-2 rounded-xl whitespace-nowrap"
@@ -535,6 +569,17 @@ function ExerciseRunnerContent() {
             })}
           </div>
 
+          {lockedAttemptInfo && (
+            <div className="mt-5 bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 font-semibold">
+              🔒 Tu as déjà rendu ce devoir le{" "}
+              {new Date(lockedAttemptInfo.submittedAt).toLocaleString("fr-FR")} — Note enregistrée :{" "}
+              <strong>
+                {lockedAttemptInfo.score.toFixed(2)} / {lockedAttemptInfo.maxScore}
+              </strong>
+              . Ton professeur a limité ce devoir à 1 seul essai.
+            </div>
+          )}
+
           <div className="mt-6 flex flex-col sm:flex-row gap-3">
             {!submitted ? (
               <button
@@ -546,17 +591,25 @@ function ExerciseRunnerContent() {
               </button>
             ) : (
               <>
-                <button
-                  onClick={resetWithNewValues}
-                  className="flex-1 bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 text-sm shadow-lg shadow-indigo-100"
-                >
-                  {activeExercise.isRandomizable ? "🎲 Refaire avec de nouvelles valeurs" : "🔄 Réessayer"}
-                </button>
+                {allowRetry ? (
+                  <button
+                    onClick={resetWithNewValues}
+                    className="flex-1 bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 text-sm shadow-lg shadow-indigo-100"
+                  >
+                    {activeExercise.isRandomizable
+                      ? "🎲 Refaire avec de nouvelles valeurs"
+                      : "🔄 Réessayer"}
+                  </button>
+                ) : (
+                  <div className="flex-1 bg-slate-100 border border-slate-200 text-slate-600 font-bold py-3.5 px-4 rounded-2xl text-xs text-center flex items-center justify-center gap-2">
+                    🔒 Devoir soumis (1 seul essai autorisé par ton professeur)
+                  </div>
+                )}
                 <Link
-                  href={`/exercises/${nextExercise.id}`}
+                  href="/exercises"
                   className="flex-1 text-center bg-emerald-600 text-white font-bold py-3.5 rounded-2xl hover:bg-emerald-700 text-sm"
                 >
-                  Autre exercice →
+                  Retour aux exercices →
                 </Link>
               </>
             )}

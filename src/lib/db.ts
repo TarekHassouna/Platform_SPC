@@ -48,6 +48,7 @@ export interface ClassAssignmentRow {
   title: string;
   className: string;
   mode: string;
+  allowRetry: boolean;
   dueAt: string | null;
   targetExerciseId?: string;
 }
@@ -267,7 +268,7 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
     const [{ data: asgRows }, { data: allVersions }] = await Promise.all([
       supabase
         .from("assignments")
-        .select("id, title, class_id, mode, due_at, exercise_version_ids")
+        .select("*")
         .in("class_id", classIds)
         .order("created_at", { ascending: false }),
       supabase
@@ -295,11 +296,15 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
         if (found) targetExerciseId = String(found.id);
       }
 
+      const isGraded = a.mode === "graded";
+      const allowRetry = typeof a.allow_retry === "boolean" ? a.allow_retry : !isGraded;
+
       return {
         id: String(a.id),
         title: String(a.title),
         className: enrolledClasses.find((c) => c.id === a.class_id)?.name || "Classe",
-        mode: a.mode === "graded" ? "Noté" : "Entraînement",
+        mode: isGraded ? "Noté" : "Entraînement",
+        allowRetry,
         dueAt: a.due_at ? String(a.due_at) : null,
         targetExerciseId,
       };
@@ -353,6 +358,7 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
  */
 export async function recordExerciseSubmission(params: {
   studentId: string;
+  assignmentId?: string;
   exerciseId?: string;
   exerciseTitle?: string;
   conceptCodes?: string[];
@@ -369,10 +375,14 @@ export async function recordExerciseSubmission(params: {
     return;
   }
 
+  const isUuid = (v?: string) =>
+    Boolean(v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
+
   const { data: sub } = await supabase
     .from("submissions")
     .insert({
       student_id: params.studentId,
+      assignment_id: isUuid(params.assignmentId) ? params.assignmentId : null,
       input_mode: "typed",
       rendered_params: {
         ...params.renderedParams,
@@ -651,5 +661,74 @@ export async function fetchDatabaseExercise(
     questions: Array.isArray(version.questions_schema)
       ? (version.questions_schema as DatabaseExerciseRecord["questions"])
       : [],
+  };
+}
+
+/**
+ * Reads teacher's retry policy for an assignment + checks if the student already submitted it.
+ */
+export async function fetchAssignmentPolicyAndAttempt(
+  assignmentId: string,
+  studentId?: string
+): Promise<{
+  title: string;
+  mode: "Noté" | "Entraînement";
+  allowRetry: boolean;
+  previousAttempt?: {
+    answers: Record<string, string>;
+    score: number;
+    maxScore: number;
+    submittedAt: string;
+  };
+} | null> {
+  const supabase = getSupabaseBrowserClient();
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(assignmentId);
+  if (!isSupabaseConfigured || !supabase || !isUuid) return null;
+
+  const { data: asg } = await supabase
+    .from("assignments")
+    .select("*")
+    .eq("id", assignmentId)
+    .maybeSingle();
+
+  if (!asg) return null;
+  const isGraded = asg.mode === "graded";
+  const allowRetry = typeof asg.allow_retry === "boolean" ? asg.allow_retry : !isGraded;
+
+  let previousAttempt: {
+    answers: Record<string, string>;
+    score: number;
+    maxScore: number;
+    submittedAt: string;
+  } | undefined;
+
+  if (studentId) {
+    const { data: sub } = await supabase
+      .from("submissions")
+      .select("raw_answers, created_at, evaluation_results(score, max_score)")
+      .eq("student_id", studentId)
+      .eq("assignment_id", assignmentId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (sub) {
+      const ev = (Array.isArray(sub.evaluation_results)
+        ? sub.evaluation_results[0]
+        : sub.evaluation_results) as Record<string, unknown> | null;
+      previousAttempt = {
+        answers: (sub.raw_answers as Record<string, string>) || {},
+        score: Number(ev?.score ?? 0),
+        maxScore: Number(ev?.max_score ?? 1),
+        submittedAt: String(sub.created_at),
+      };
+    }
+  }
+
+  return {
+    title: String(asg.title),
+    mode: isGraded ? "Noté" : "Entraînement",
+    allowRetry,
+    previousAttempt,
   };
 }

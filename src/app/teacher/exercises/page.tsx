@@ -20,6 +20,7 @@ export default function TeacherExercisesPage() {
   const [assignTitle, setAssignTitle] = useState("");
   const [assignDueDate, setAssignDueDate] = useState("28 nov. 2026");
   const [assignMode, setAssignMode] = useState<"Entraînement" | "Noté">("Entraînement");
+  const [assignAllowRetry, setAssignAllowRetry] = useState<boolean>(true);
   const [toast, setToast] = useState<string | null>(null);
 
   const filteredExercises = exercises.filter((ex) => {
@@ -46,15 +47,16 @@ export default function TeacherExercisesPage() {
     setTargetClassId(selectedClassId !== "all" ? selectedClassId : classes[0]?.id || "");
   };
 
-  const handleAssignSubmit = (e: React.FormEvent) => {
+  const handleAssignSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!assigningEx || !targetClassId) return;
-    addAssignment({
+    await addAssignment({
       title: assignTitle || assigningEx.title,
       classId: targetClassId,
       exerciseIds: [assigningEx.id],
       dueDate: assignDueDate,
       mode: assignMode,
+      allowRetry: assignAllowRetry,
     });
     const clsName = classes.find((c) => c.id === targetClassId)?.name || "la classe";
     setAssigningEx(null);
@@ -242,6 +244,15 @@ export default function TeacherExercisesPage() {
                       >
                         Mode {asg.mode}
                       </span>
+                      <span
+                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg ${
+                          asg.allowRetry
+                            ? "bg-slate-100 text-slate-600"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {asg.allowRetry ? "🔄 Réessais autorisés" : "🔒 1 seul essai"}
+                      </span>
                       <span className="text-xs text-slate-400">Échéance : {asg.dueDate}</span>
                     </div>
                     <h3 className="font-bold text-slate-900">{asg.title}</h3>
@@ -316,7 +327,11 @@ export default function TeacherExercisesPage() {
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">Mode</label>
                   <select
                     value={assignMode}
-                    onChange={(e) => setAssignMode(e.target.value as "Entraînement" | "Noté")}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as "Entraînement" | "Noté";
+                      setAssignMode(nextMode);
+                      setAssignAllowRetry(nextMode === "Entraînement");
+                    }}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-900 bg-white outline-none focus:border-indigo-400"
                   >
                     <option value="Entraînement">Entraînement</option>
@@ -333,6 +348,26 @@ export default function TeacherExercisesPage() {
                   />
                 </div>
               </div>
+
+              {/* Teacher retry control */}
+              <label className="flex items-start gap-3 cursor-pointer bg-slate-50 border border-slate-200 rounded-2xl p-3.5">
+                <input
+                  type="checkbox"
+                  checked={assignAllowRetry}
+                  onChange={(e) => setAssignAllowRetry(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0"
+                />
+                <div>
+                  <div className="text-xs font-bold text-slate-900">
+                    Autoriser l&apos;élève à refaire l&apos;exercice
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {assignAllowRetry
+                      ? "L'élève pourra réessayer autant de fois qu'il le souhaite pour progresser."
+                      : "Verrouillé après 1 seul essai : l'élève ne pourra pas refaire ce devoir."}
+                  </div>
+                </div>
+              </label>
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"

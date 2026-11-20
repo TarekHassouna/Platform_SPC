@@ -264,13 +264,26 @@ export default function DashboardPage() {
                       className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-5 flex items-center justify-between gap-4"
                     >
                       <div>
-                        <div className="text-xs font-bold text-indigo-700 mb-1">
-                          {asg.className} · {asg.mode}
+                        <div className="text-xs font-bold text-indigo-700 mb-1 flex items-center gap-2 flex-wrap">
+                          <span>{asg.className} · {asg.mode}</span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full ${
+                              asg.allowRetry
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-amber-100 text-amber-800"
+                            }`}
+                          >
+                            {asg.allowRetry ? "🔄 Réessais autorisés" : "🔒 1 seul essai"}
+                          </span>
                         </div>
                         <div className="font-bold text-slate-900">{asg.title}</div>
                       </div>
                       <Link
-                        href={asg.targetExerciseId ? `/exercises/${asg.targetExerciseId}` : "/exercises"}
+                        href={
+                          asg.targetExerciseId
+                            ? `/exercises/${asg.targetExerciseId}?assignmentId=${asg.id}`
+                            : "/exercises"
+                        }
                         className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 whitespace-nowrap"
                       >
                         Ouvrir →
