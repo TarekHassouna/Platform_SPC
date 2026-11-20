@@ -14,12 +14,15 @@ interface TranscribedLine {
 }
 
 interface PhotoAnalysis {
-  status: "correct" | "partially_correct" | "incorrect";
-  score: number;
+  mode: PhotoMode;
+  hasStudentWork: boolean;
+  status: "correct" | "partially_correct" | "incorrect" | "no_work";
+  score: number | null;
   maxScore: number;
   errorCode: string | null;
   summary: string;
   tutorReply: string;
+  rubricBreakdown?: { criterion: string; points: number; maxPoints: number; comment: string }[];
   steps: { lineId: number; verdict: "correct" | "error" | "partial" | "info"; comment: string }[];
 }
 
@@ -39,7 +42,68 @@ const VERDICT_STYLE: Record<string, { box: string; label: string }> = {
   correct: { box: "bg-emerald-50 border-emerald-200 text-emerald-900", label: "✅ Correct" },
   error: { box: "bg-rose-50 border-rose-200 text-rose-900", label: "❌ Erreur" },
   partial: { box: "bg-amber-50 border-amber-200 text-amber-900", label: "⚠️ Partiel" },
-  info: { box: "bg-slate-50 border-slate-200 text-slate-800", label: "ℹ️ Info" },
+  info: { box: "bg-slate-50 border-slate-200 text-slate-800", label: "ℹ️ Énoncé / Info" },
+};
+
+const MODE_CONFIG: Record<
+  PhotoMode,
+  {
+    icon: string;
+    title: string;
+    badge: string;
+    desc: string;
+    uploadTitle: string;
+    uploadHint: string;
+    uploadCta: string;
+    confirmCta: string;
+    step3Label: string;
+    accentBorder: string;
+    accentBg: string;
+    accentBtn: string;
+  }
+> = {
+  question: {
+    icon: "❓",
+    title: "« J'ai une question »",
+    badge: "Non noté · Aide tuteur",
+    desc: "Photographie un énoncé ou un brouillon + pose ta question : le tuteur t'explique la méthode sans te noter.",
+    uploadTitle: "Importe la photo de ton énoncé ou de ton brouillon",
+    uploadHint: "Idéal quand tu bloques sur une question d'exercice. Aucune note ne sera enregistrée.",
+    uploadCta: "📷 Importer l'énoncé / le brouillon",
+    confirmCta: "💬 Confirmer la lecture et poser ma question",
+    step3Label: "3. Réponse du tuteur",
+    accentBorder: "border-violet-300",
+    accentBg: "bg-violet-50/40",
+    accentBtn: "bg-violet-600 hover:bg-violet-700 shadow-violet-100",
+  },
+  correct: {
+    icon: "✍️",
+    title: "« Corrige-moi »",
+    badge: "Correction détaillée · / 10",
+    desc: "Photographie TA copie déjà rédigée : l'IA vérifie chaque ligne, pointe la première erreur et explique le corrigé.",
+    uploadTitle: "Importe la photo de TA copie avec tes réponses rédigées",
+    uploadHint: "Ta feuille doit contenir tes calculs ou réponses (un énoncé seul sans réponse ne peut pas être corrigé).",
+    uploadCta: "📷 Photographier ma copie rédigée",
+    confirmCta: "✍️ Confirmer la lecture et corriger ma copie",
+    step3Label: "3. Correction détaillée",
+    accentBorder: "border-indigo-300",
+    accentBg: "bg-indigo-50/40",
+    accentBtn: "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-100",
+  },
+  grade: {
+    icon: "🎓",
+    title: "« Note-moi »",
+    badge: "Barème Bac · / 20 · Transmis au prof",
+    desc: "Soumets ta copie complète rédigée pour recevoir une note détaillée sur 20 et la transmettre à ton professeur.",
+    uploadTitle: "Soumets ta copie complète rédigée (mode examen / 20)",
+    uploadHint: "Notation par critères (formules, calculs, unités, rédaction) + envoi dans l'espace de ton professeur.",
+    uploadCta: "📷 Soumettre ma copie à noter (/ 20)",
+    confirmCta: "🎓 Confirmer la lecture et noter sur 20",
+    step3Label: "3. Note & barème / 20",
+    accentBorder: "border-emerald-300",
+    accentBg: "bg-emerald-50/40",
+    accentBtn: "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100",
+  },
 };
 
 export default function PhotoSubmissionPage() {
@@ -59,6 +123,8 @@ export default function PhotoSubmissionPage() {
   const [analysis, setAnalysis] = useState<PhotoAnalysis | null>(null);
   const [savedToDb, setSavedToDb] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const cfg = MODE_CONFIG[mode];
 
   const resetAll = () => {
     setStep("upload");
@@ -112,16 +178,19 @@ export default function PhotoSubmissionPage() {
     setUploading(false);
   };
 
-  const confirmAndAnalyze = async () => {
+  const confirmAndAnalyze = async (overrideMode?: PhotoMode) => {
+    const activeMode = overrideMode || mode;
+    if (overrideMode) setMode(overrideMode);
     setErrorMsg(null);
     setAnalyzing(true);
+    setSavedToDb(false);
     let result: PhotoAnalysis | null = null;
     try {
       const res = await fetch("/api/vision/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode,
+          mode: activeMode,
           questionText: studentQuestion,
           lines: lines.map((l) => ({ id: l.id, text: l.text })),
         }),
@@ -140,15 +209,25 @@ export default function PhotoSubmissionPage() {
       return;
     }
 
-    if (user?.id && result) {
+    // ONLY record a graded copy in Supabase if:
+    // 1) mode is 'correct' or 'grade' (NOT 'question' tutor help), AND
+    // 2) the photo actually contains student answers (hasStudentWork === true)!
+    if (
+      user?.id &&
+      result &&
+      activeMode !== "question" &&
+      result.hasStudentWork &&
+      result.score !== null
+    ) {
       const saved = await recordPhotoSubmission({
         studentId: user.id,
         fileName: fileName || "copie_manuscrite.jpg",
         storagePath,
-        mode,
+        mode: activeMode,
         lines,
         analysis: {
-          status: result.status,
+          status:
+            result.status === "no_work" ? "incorrect" : result.status,
           score: result.score,
           maxScore: result.maxScore,
           summary: result.summary,
@@ -193,10 +272,10 @@ export default function PhotoSubmissionPage() {
       </header>
 
       <main className="max-w-4xl mx-auto p-6 lg:p-10">
-        <div className="mb-8">
+        <div className="mb-7">
           <h1 className="text-2xl font-extrabold text-slate-900 mb-1">Soumets une photo de ta copie papier</h1>
           <p className="text-slate-500 text-sm">
-            Photographie ton raisonnement, vérifie la lecture, puis obtiens une correction réelle par l&apos;IA.
+            Choisis d&apos;abord ce que tu veux faire (<strong>aide</strong>, <strong>correction</strong> ou <strong>note sur 20</strong>), puis importe ta photo.
           </p>
         </div>
 
@@ -206,34 +285,46 @@ export default function PhotoSubmissionPage() {
           </div>
         )}
 
-        <div className="grid sm:grid-cols-3 gap-3 mb-8">
-          {[
-            { id: "question" as PhotoMode, icon: "❓", title: "« J'ai une question »", desc: "Photo + question — le tuteur te guide sur ton vrai brouillon" },
-            { id: "correct" as PhotoMode, icon: "✍️", title: "« Corrige-moi »", desc: "Première erreur pointée, explication et bonne démarche" },
-            { id: "grade" as PhotoMode, icon: "🎓", title: "« Note-moi »", desc: "Notation type Bac sur 10 avec crédit partiel" },
-          ].map((m) => (
-            <button
-              key={m.id}
-              onClick={() => step === "upload" && setMode(m.id)}
-              disabled={step !== "upload"}
-              className={`text-left rounded-2xl p-4 border transition-all disabled:cursor-not-allowed ${
-                mode === m.id
-                  ? "bg-indigo-50 border-indigo-400 ring-2 ring-indigo-100"
-                  : "bg-white border-slate-200 hover:border-indigo-200 disabled:opacity-60"
-              }`}
-            >
-              <div className="text-2xl mb-1.5">{m.icon}</div>
-              <div className="font-bold text-slate-900 text-sm">{m.title}</div>
-              <div className="text-xs text-slate-500 mt-1 leading-relaxed">{m.desc}</div>
-            </button>
-          ))}
+        {/* Mode selector — active even in step 2 so user can switch before analyzing */}
+        <div className="grid sm:grid-cols-3 gap-3 mb-7">
+          {(["question", "correct", "grade"] as PhotoMode[]).map((mKey) => {
+            const m = MODE_CONFIG[mKey];
+            const isSelected = mode === mKey;
+            return (
+              <button
+                key={mKey}
+                type="button"
+                onClick={() => step !== "result" && setMode(mKey)}
+                disabled={step === "result"}
+                className={`text-left rounded-2xl p-4 border transition-all disabled:cursor-not-allowed ${
+                  isSelected
+                    ? "bg-indigo-50 border-indigo-500 ring-2 ring-indigo-200 shadow-xs"
+                    : "bg-white border-slate-200 hover:border-indigo-300 disabled:opacity-60"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-2xl">{m.icon}</span>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      isSelected ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    {m.badge}
+                  </span>
+                </div>
+                <div className="font-bold text-slate-900 text-sm">{m.title}</div>
+                <div className="text-xs text-slate-500 mt-1 leading-relaxed">{m.desc}</div>
+              </button>
+            );
+          })}
         </div>
 
+        {/* Stepper */}
         <div className="flex items-center gap-2 text-xs font-bold mb-6">
           {[
             { id: "upload", label: "1. Photo" },
             { id: "confirm", label: "2. Confirmation lecture" },
-            { id: "result", label: "3. Correction" },
+            { id: "result", label: cfg.step3Label },
           ].map((s, i) => (
             <div key={s.id} className="flex items-center gap-2">
               <span
@@ -248,36 +339,54 @@ export default function PhotoSubmissionPage() {
           ))}
         </div>
 
+        {/* STEP 1: Upload — visually adapts to chosen mode */}
         {step === "upload" && (
           <div className="bg-white rounded-3xl border border-slate-100 p-8 shadow-sm text-center">
-            <div className="border-2 border-dashed border-indigo-200 rounded-3xl p-10 bg-indigo-50/30">
-              <div className="text-4xl mb-3">📷</div>
-              <h2 className="font-bold text-slate-900 text-base mb-1">Prends en photo ou importe ta feuille</h2>
-              <p className="text-xs text-slate-500 mb-6">
-                Stockage privé Supabase Storage · Supprimé automatiquement après 90 jours
-              </p>
+            <div className={`border-2 border-dashed rounded-3xl p-8 sm:p-10 ${cfg.accentBorder} ${cfg.accentBg}`}>
+              <div className="text-4xl mb-2">{cfg.icon}</div>
+              <div className="inline-block text-[11px] font-bold uppercase tracking-wider px-3 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 mb-3">
+                Mode actif : {cfg.title} · {cfg.badge}
+              </div>
+              <h2 className="font-extrabold text-slate-900 text-base mb-1">{cfg.uploadTitle}</h2>
+              <p className="text-xs text-slate-600 max-w-lg mx-auto mb-6">{cfg.uploadHint}</p>
 
               {mode === "question" && (
-                <div className="max-w-md mx-auto mb-5 text-left">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                <div className="max-w-lg mx-auto mb-6 text-left space-y-2">
+                  <label className="block text-xs font-bold text-slate-700">
                     Ta question sur cette feuille :
                   </label>
                   <input
                     type="text"
                     value={studentQuestion}
                     onChange={(e) => setStudentQuestion(e.target.value)}
-                    placeholder="ex : Pourquoi je ne trouve pas le même résultat que le corrigé ?"
-                    className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-indigo-400"
+                    placeholder="ex : Je ne comprends pas la question 2, quelle formule utiliser ?"
+                    className="w-full border border-violet-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-violet-500"
                   />
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      "Je ne sais pas par où commencer",
+                      "Quelle formule utiliser ?",
+                      "Explique-moi l'énoncé étape par étape",
+                    ].map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => setStudentQuestion(chip)}
+                        className="text-[11px] font-semibold bg-white border border-violet-200 text-violet-700 hover:bg-violet-100 px-2.5 py-1 rounded-lg"
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
               <label
-                className={`inline-block cursor-pointer bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm shadow-md shadow-indigo-100 ${
+                className={`inline-block cursor-pointer text-white font-bold px-6 py-3 rounded-xl transition-colors text-sm shadow-md ${cfg.accentBtn} ${
                   uploading ? "opacity-60 pointer-events-none" : ""
                 }`}
               >
-                {uploading ? "⏳ Lecture de ta copie par l'IA…" : "📷 Choisir / Prendre une photo"}
+                {uploading ? "⏳ Lecture de ta photo par Gemini Vision…" : cfg.uploadCta}
                 <input
                   type="file"
                   accept="image/*"
@@ -291,10 +400,15 @@ export default function PhotoSubmissionPage() {
                   }}
                 />
               </label>
+
+              <p className="text-[11px] text-slate-400 mt-5">
+                Stockage privé Supabase Storage · Supprimé automatiquement après 90 jours
+              </p>
             </div>
           </div>
         )}
 
+        {/* STEP 2: Confirm OCR */}
         {step === "confirm" && (
           <div className="bg-white rounded-3xl border border-slate-100 p-7 shadow-sm space-y-5">
             <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -305,7 +419,7 @@ export default function PhotoSubmissionPage() {
                   {storagePath && <span className="ml-2 text-emerald-600">✓ Stocké en privé</span>}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Corrige les lignes mal lues avant l&apos;analyse — la correction se basera exactement sur ce texte.
+                  Vérifie ou corrige les lignes ci-dessous avant de lancer le mode <strong>{cfg.title}</strong>.
                 </p>
               </div>
               <button onClick={resetAll} className="text-xs font-semibold text-slate-500 hover:text-slate-800">
@@ -320,6 +434,21 @@ export default function PhotoSubmissionPage() {
                 alt="Ta copie"
                 className="w-full max-h-64 object-contain rounded-2xl border border-slate-200 bg-slate-50"
               />
+            )}
+
+            {mode === "question" && (
+              <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4">
+                <label className="block text-xs font-bold text-violet-900 mb-1.5">
+                  ❓ Ta question au tuteur :
+                </label>
+                <input
+                  type="text"
+                  value={studentQuestion}
+                  onChange={(e) => setStudentQuestion(e.target.value)}
+                  placeholder="ex : Comment démarrer la question 1 ?"
+                  className="w-full border border-violet-200 rounded-xl px-3.5 py-2 text-sm text-slate-900 bg-white outline-none focus:border-violet-500"
+                />
+              </div>
             )}
 
             <div className="space-y-3">
@@ -389,91 +518,163 @@ export default function PhotoSubmissionPage() {
             </div>
 
             <button
-              onClick={confirmAndAnalyze}
+              onClick={() => confirmAndAnalyze()}
               disabled={analyzing || lines.every((l) => !l.text.trim())}
-              className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100 disabled:opacity-60"
+              className={`w-full text-white font-bold py-3.5 rounded-2xl transition-colors shadow-lg disabled:opacity-60 ${cfg.accentBtn}`}
             >
-              {analyzing ? "⏳ Correction par l'IA en cours…" : "✅ Confirmer la lecture et analyser"}
+              {analyzing ? "⏳ Analyse IA en cours…" : cfg.confirmCta}
             </button>
           </div>
         )}
 
+        {/* STEP 3: Distinct Results per Mode */}
         {step === "result" && analysis && (
-          <div className="bg-white rounded-3xl border border-slate-100 p-7 shadow-sm space-y-4">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <h2 className="text-lg font-extrabold text-slate-900">
-                {mode === "grade"
-                  ? `🎓 Note estimée : ${analysis.score.toFixed(1).replace(".", ",")} / ${analysis.maxScore}`
-                  : mode === "question"
-                  ? "❓ Réponse du tuteur sur ton brouillon"
-                  : "✍️ Correction étape par étape"}
-              </h2>
-              <div className="flex items-center gap-2">
-                {mode !== "grade" && (
-                  <span className="text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1 rounded-full">
-                    {analysis.score.toFixed(1).replace(".", ",")} / {analysis.maxScore}
-                  </span>
-                )}
-                {analysis.errorCode && (
-                  <span className="text-xs font-bold bg-rose-100 text-rose-700 px-3 py-1 rounded-full font-mono">
-                    {analysis.errorCode}
-                  </span>
-                )}
+          <div className="bg-white rounded-3xl border border-slate-100 p-7 shadow-sm space-y-5">
+            {/* Case A: User sent an exercise statement WITHOUT student answers in Correct or Grade mode */}
+            {!analysis.hasStudentWork && analysis.mode !== "question" ? (
+              <div className="bg-amber-50 border border-amber-300 rounded-2xl p-5 space-y-3">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl">⚠️</span>
+                  <div>
+                    <h2 className="font-extrabold text-amber-950 text-base">
+                      Aucune réponse d&apos;élève détectée sur cette photo
+                    </h2>
+                    <p className="text-xs text-amber-900 mt-1 leading-relaxed">
+                      {analysis.summary} Pour recevoir une correction ou une note, écris d&apos;abord tes réponses sur papier puis photographie ta résolution. Si tu veux juste de l&apos;aide pour comprendre cet énoncé, clique ci-dessous !
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    disabled={analyzing}
+                    onClick={() => confirmAndAnalyze("question")}
+                    className="bg-violet-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-violet-700 disabled:opacity-60"
+                  >
+                    {analyzing ? "⏳ Chargement…" : "❓ Basculer en mode « J'ai une question » (aide tuteur)"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetAll}
+                    className="bg-white border border-amber-300 text-amber-900 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-amber-100"
+                  >
+                    📷 Envoyer une photo avec mes réponses
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h2 className="text-lg font-extrabold text-slate-900">
+                    {analysis.mode === "grade" && analysis.score !== null
+                      ? `🎓 Note estimée (Barème Bac) : ${analysis.score.toFixed(1).replace(".", ",")} / ${analysis.maxScore}`
+                      : analysis.mode === "question"
+                      ? "❓ Explication du tuteur sur ta photo (non noté)"
+                      : "✍️ Correction étape par étape"}
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    {analysis.mode === "correct" && analysis.score !== null && (
+                      <span className="text-xs font-bold bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full">
+                        Score : {analysis.score.toFixed(1).replace(".", ",")} / {analysis.maxScore}
+                      </span>
+                    )}
+                    {analysis.mode === "question" && (
+                      <span className="text-xs font-bold bg-violet-100 text-violet-700 px-3 py-1 rounded-full">
+                        Aide pédagogique · Non noté
+                      </span>
+                    )}
+                    {analysis.errorCode && (
+                      <span className="text-xs font-bold bg-rose-100 text-rose-700 px-3 py-1 rounded-full font-mono">
+                        {analysis.errorCode}
+                      </span>
+                    )}
+                  </div>
+                </div>
 
-            <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-sm text-indigo-900">
-              <strong>Bilan : </strong>
-              {analysis.summary}
-            </div>
+                {/* Summary */}
+                <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-sm text-indigo-900">
+                  <strong>Bilan : </strong>
+                  {analysis.summary}
+                </div>
 
-            {analysis.tutorReply && (
-              <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4 text-sm text-violet-900 whitespace-pre-line">
-                <strong>💬 Tuteur : </strong>
-                {analysis.tutorReply}
-              </div>
-            )}
+                {/* Tutor Reply */}
+                {analysis.tutorReply && (
+                  <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 text-sm text-violet-950 whitespace-pre-line leading-relaxed">
+                    <strong>💬 {analysis.mode === "question" ? "Réponse du tuteur : " : "Conseil & méthode : "}</strong>
+                    {analysis.tutorReply}
+                  </div>
+                )}
 
-            <div className="space-y-2.5 text-sm">
-              {lines
-                .filter((l) => l.text.trim())
-                .map((l, idx) => {
-                  const st = analysis.steps.find((s) => s.lineId === l.id);
-                  const style = VERDICT_STYLE[st?.verdict || "info"];
-                  return (
-                    <div key={l.id} className={`rounded-2xl border p-4 ${style.box}`}>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <strong>
-                          {style.label} · Ligne {idx + 1}
-                        </strong>
-                        <span className="font-mono text-xs bg-white/80 px-1.5 py-0.5 rounded">{l.text}</span>
-                      </div>
-                      {st?.comment && <span className="block mt-1.5 text-xs">{st.comment}</span>}
+                {/* Bac Rubric Breakdown (Grade mode only) */}
+                {analysis.mode === "grade" && analysis.rubricBreakdown && analysis.rubricBreakdown.length > 0 && (
+                  <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4 space-y-2.5">
+                    <div className="text-xs font-extrabold uppercase tracking-wider text-emerald-900">
+                      📋 Barème détaillé sur {analysis.maxScore}
                     </div>
-                  );
-                })}
-            </div>
+                    <div className="grid sm:grid-cols-2 gap-2.5">
+                      {analysis.rubricBreakdown.map((item, idx) => (
+                        <div key={idx} className="bg-white rounded-xl p-3 border border-emerald-100">
+                          <div className="flex items-center justify-between gap-2 text-xs font-bold text-slate-900 mb-1">
+                            <span>{item.criterion}</span>
+                            <span className="text-emerald-700 font-mono">
+                              {item.points} / {item.maxPoints}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-600">{item.comment}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-            <div className="text-xs text-slate-500">
-              {savedToDb
-                ? "✓ Copie et correction enregistrées — ton professeur peut la consulter et ajuster la note."
-                : "⚠️ Correction affichée mais non enregistrée (connexion Supabase indisponible)."}
-            </div>
+                {/* Line-by-line review */}
+                <div className="space-y-2.5 text-sm">
+                  {lines
+                    .filter((l) => l.text.trim())
+                    .map((l, idx) => {
+                      const st = analysis.steps.find((s) => s.lineId === l.id);
+                      const style = VERDICT_STYLE[st?.verdict || "info"];
+                      return (
+                        <div key={l.id} className={`rounded-2xl border p-4 ${style.box}`}>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <strong>
+                              {style.label} · Ligne {idx + 1}
+                            </strong>
+                            <span className="font-mono text-xs bg-white/80 px-1.5 py-0.5 rounded">{l.text}</span>
+                          </div>
+                          {st?.comment && <span className="block mt-1.5 text-xs">{st.comment}</span>}
+                        </div>
+                      );
+                    })}
+                </div>
 
-            <div className="flex flex-wrap gap-3 pt-2">
-              <Link
-                href="/exercises"
-                className="flex-1 text-center bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 text-sm"
-              >
-                S&apos;entraîner sur des exercices →
-              </Link>
-              <button
-                onClick={resetAll}
-                className="px-5 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Nouvelle photo
-              </button>
-            </div>
+                {/* Honest persistence status */}
+                <div className="text-xs text-slate-500">
+                  {analysis.mode === "question"
+                    ? "ℹ️ Session d'aide uniquement : aucune note n'a été enregistrée dans tes résultats."
+                    : savedToDb
+                    ? "✓ Copie et correction enregistrées — ton professeur peut la consulter et ajuster la note dans « Correction de copies »."
+                    : "ℹ️ Correction affichée."}
+                </div>
+
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <Link
+                    href={analysis.mode === "question" ? "/tutor" : "/exercises"}
+                    className="flex-1 text-center bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 text-sm"
+                  >
+                    {analysis.mode === "question"
+                      ? "Continuer la discussion avec le Tuteur IA →"
+                      : "S'entraîner sur des exercices →"}
+                  </Link>
+                  <button
+                    onClick={resetAll}
+                    className="px-5 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Nouvelle photo
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </main>
