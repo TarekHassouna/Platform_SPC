@@ -25,6 +25,7 @@ export default function DashboardPage() {
     enrolledClasses: [],
     assignments: [],
     mastery: [],
+    allConcepts: [],
     recentSubmissions: [],
     fromDatabase: false,
   });
@@ -94,9 +95,21 @@ export default function DashboardPage() {
       )
     : 0;
 
-  const recommendedExercises = CURRICULUM_EXERCISES.filter(
-    (ex) => !user?.level || ex.level === user.level
-  ).slice(0, 3);
+  // Adaptive recommendations derived ONLY from real Supabase concept_mastery data
+  const weakOrDeveloping = [...data.mastery]
+    .filter((m) => m.status === "needs_review" || m.status === "developing")
+    .sort((a, b) => a.masteryScore - b.masteryScore)
+    .slice(0, 3);
+
+  const adaptiveRecommendations = weakOrDeveloping
+    .map((m) => {
+      const ex = CURRICULUM_EXERCISES.find((e) => e.conceptCodes.includes(m.conceptCode));
+      return ex ? { mastery: m, exercise: ex } : null;
+    })
+    .filter(Boolean) as {
+    mastery: (typeof data.mastery)[number];
+    exercise: (typeof CURRICULUM_EXERCISES)[number];
+  }[];
 
   const navItems = [
     { icon: "🏠", label: "Tableau de bord", href: "/dashboard", active: true },
@@ -190,7 +203,12 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {[
             { label: "Exercices soumis", value: String(totalSubmissions), icon: "📝", color: "text-indigo-600" },
-            { label: "Compétences acquises", value: `${acquiredCount} / ${Math.max(data.mastery.length, 7)}`, icon: "✅", color: "text-emerald-600" },
+            {
+              label: "Compétences acquises",
+              value: data.mastery.length > 0 ? `${acquiredCount} / ${data.mastery.length}` : "0",
+              icon: "✅",
+              color: "text-emerald-600",
+            },
             { label: "Précision récente", value: totalSubmissions ? `${avgPrecision}%` : "—", icon: "🎯", color: "text-orange-600" },
             { label: "Mes classes", value: String(data.enrolledClasses.length), icon: "🏫", color: "text-violet-600" },
           ].map((s) => (
@@ -265,29 +283,56 @@ export default function DashboardPage() {
 
             <div>
               <h2 className="text-lg font-bold text-slate-900 mb-3">
-                Exercices recommandés ({level})
+                Recommandations adaptatives
               </h2>
-              <div className="space-y-3">
-                {recommendedExercises.map((ex) => (
-                  <div
-                    key={ex.id}
-                    className="bg-white border border-slate-100 rounded-2xl p-5 flex items-center justify-between gap-4 shadow-xs hover:border-indigo-200 transition-all"
+              {adaptiveRecommendations.length === 0 ? (
+                <div className="bg-white border border-slate-100 rounded-2xl p-6 text-center shadow-xs">
+                  <div className="text-2xl mb-2">🎯</div>
+                  <p className="text-sm font-semibold text-slate-800 mb-1">
+                    Aucune recommandation pour le moment
+                  </p>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto mb-4">
+                    Dès que tu fais un exercice ou un devoir de classe, le moteur adaptatif détecte tes erreurs et te propose ici des exercices ciblés sur tes vraies lacunes.
+                  </p>
+                  <Link
+                    href="/exercises"
+                    className="inline-flex items-center gap-1.5 bg-indigo-600 text-white text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-indigo-700"
                   >
-                    <div>
-                      <div className="text-xs font-semibold text-indigo-600 mb-1">
-                        {ex.domain} · {ex.chapter} · {ex.difficulty}
-                      </div>
-                      <div className="font-bold text-slate-900">{ex.title}</div>
-                    </div>
-                    <Link
-                      href={`/exercises/${ex.id}`}
-                      className="bg-indigo-50 text-indigo-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-indigo-100 transition-colors whitespace-nowrap"
+                    Parcourir les exercices ({level}) →
+                  </Link>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {adaptiveRecommendations.map(({ mastery: m, exercise: ex }) => (
+                    <div
+                      key={`${m.conceptCode}-${ex.id}`}
+                      className={`border rounded-2xl p-5 flex items-center justify-between gap-4 shadow-xs transition-all ${
+                        m.status === "needs_review"
+                          ? "bg-rose-50/70 border-rose-200"
+                          : "bg-amber-50/70 border-amber-200"
+                      }`}
                     >
-                      Commencer →
-                    </Link>
-                  </div>
-                ))}
-              </div>
+                      <div>
+                        <div className="text-xs font-bold text-rose-700 mb-1">
+                          {m.status === "needs_review"
+                            ? `⚠️ Lacune détectée : ${m.conceptLabel} (${m.masteryScore}%)`
+                            : `🔁 À consolider : ${m.conceptLabel} (${m.masteryScore}%)`}
+                        </div>
+                        <div className="font-bold text-slate-900">{ex.title}</div>
+                        <div className="text-xs text-slate-500">
+                          {ex.domain} · {ex.chapter} · {ex.difficulty}
+                        </div>
+                      </div>
+                      <Link
+                        href={`/exercises/${ex.id}`}
+                        className="bg-white border border-slate-200 text-indigo-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:border-indigo-300 transition-colors whitespace-nowrap"
+                      >
+                        Travailler →
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

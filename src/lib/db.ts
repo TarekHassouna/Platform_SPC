@@ -51,10 +51,18 @@ export interface ClassAssignmentRow {
   dueAt: string | null;
 }
 
+export interface ConceptRow {
+  code: string;
+  label: string;
+  domain: string;
+  level: string;
+}
+
 export interface StudentDashboardPayload {
   enrolledClasses: EnrolledClassRow[];
   assignments: ClassAssignmentRow[];
   mastery: MasteryRow[];
+  allConcepts: ConceptRow[];
   recentSubmissions: SubmissionHistoryRow[];
   fromDatabase: boolean;
 }
@@ -206,10 +214,10 @@ export async function joinClassWithCode(code: string): Promise<{
 export async function fetchStudentDashboardData(studentId: string): Promise<StudentDashboardPayload> {
   const supabase = getSupabaseBrowserClient();
   if (!isSupabaseConfigured || !supabase || !studentId || studentId.startsWith("local-") || studentId.startsWith("demo-")) {
-    return { enrolledClasses: [], assignments: [], mastery: [], recentSubmissions: [], fromDatabase: false };
+    return { enrolledClasses: [], assignments: [], mastery: [], allConcepts: [], recentSubmissions: [], fromDatabase: false };
   }
 
-  const [{ data: memberRows }, { data: masteryRows }, { data: subRows }] = await Promise.all([
+  const [{ data: memberRows }, { data: masteryRows }, { data: subRows }, { data: conceptRows }] = await Promise.all([
     supabase
       .from("class_members")
       .select("class_id, classes(id, name, level, invite_code)")
@@ -224,6 +232,7 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
       .eq("student_id", studentId)
       .order("created_at", { ascending: false })
       .limit(10),
+    supabase.from("concepts").select("code, label, domain, level"),
   ]);
 
   const enrolledClasses: EnrolledClassRow[] = (memberRows || [])
@@ -283,7 +292,14 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
     };
   });
 
-  return { enrolledClasses, assignments, mastery, recentSubmissions, fromDatabase: true };
+  const allConcepts: ConceptRow[] = (conceptRows || []).map((c: Record<string, unknown>) => ({
+    code: String(c.code),
+    label: String(c.label),
+    domain: String(c.domain),
+    level: String(c.level),
+  }));
+
+  return { enrolledClasses, assignments, mastery, allConcepts, recentSubmissions, fromDatabase: true };
 }
 
 /**
