@@ -6,16 +6,38 @@ interface MathTextProps {
   className?: string;
 }
 
+function renderProseWithBold(prose: string, keyPrefix: string) {
+  const boldParts = prose.split(/(\*\*[^*\n]+?\*\*)/g);
+  return boldParts.map((seg, i) => {
+    if (seg.startsWith("**") && seg.endsWith("**") && seg.length > 4) {
+      return (
+        <strong key={`${keyPrefix}-b-${i}`} className="font-bold">
+          {seg.slice(2, -2)}
+        </strong>
+      );
+    }
+    return <span key={`${keyPrefix}-t-${i}`}>{seg}</span>;
+  });
+}
+
 /**
- * Renders prose containing inline $...$ or display $$...$$ LaTeX using KaTeX.
+ * Renders French physics prose containing inline $...$ / \(...\) or display $$...$$ / \[...\] LaTeX
+ * via KaTeX, plus **bold** markdown emphasis.
  */
 export function MathText({ text, className = "" }: MathTextProps) {
-  const parts = text.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$)/g);
+  if (!text) return null;
+
+  const parts = text.split(
+    /(\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\$[^$\n]+?\$|\\\([\s\S]+?\\\))/g
+  );
 
   return (
     <span className={className}>
       {parts.map((part, idx) => {
-        if (part.startsWith("$$") && part.endsWith("$$")) {
+        if (
+          (part.startsWith("$$") && part.endsWith("$$") && part.length > 4) ||
+          (part.startsWith("\\[") && part.endsWith("\\]") && part.length > 4)
+        ) {
           const latex = part.slice(2, -2).trim();
           const html = katex.renderToString(latex, {
             displayMode: true,
@@ -29,15 +51,20 @@ export function MathText({ text, className = "" }: MathTextProps) {
             />
           );
         }
-        if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
-          const latex = part.slice(1, -1).trim();
+        if (
+          (part.startsWith("$") && part.endsWith("$") && part.length > 2) ||
+          (part.startsWith("\\(") && part.endsWith("\\)") && part.length > 4)
+        ) {
+          const latex = part.startsWith("$")
+            ? part.slice(1, -1).trim()
+            : part.slice(2, -2).trim();
           const html = katex.renderToString(latex, {
             displayMode: false,
             throwOnError: false,
           });
           return <span key={idx} dangerouslySetInnerHTML={{ __html: html }} />;
         }
-        return <span key={idx}>{part}</span>;
+        return <span key={idx}>{renderProseWithBold(part, String(idx))}</span>;
       })}
     </span>
   );

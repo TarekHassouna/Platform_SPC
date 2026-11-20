@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { uploadStudentPhoto, recordPhotoSubmission } from "@/lib/db";
+import { MathText } from "@/components/MathText";
 
 type PhotoMode = "question" | "correct" | "grade";
 
@@ -594,14 +595,14 @@ export default function PhotoSubmissionPage() {
                 {/* Summary */}
                 <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-sm text-indigo-900">
                   <strong>Bilan : </strong>
-                  {analysis.summary}
+                  <MathText text={analysis.summary} />
                 </div>
 
                 {/* Tutor Reply */}
                 {analysis.tutorReply && (
                   <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4 text-sm text-violet-950 whitespace-pre-line leading-relaxed">
                     <strong>💬 {analysis.mode === "question" ? "Réponse du tuteur : " : "Conseil & méthode : "}</strong>
-                    {analysis.tutorReply}
+                    <MathText text={analysis.tutorReply} />
                   </div>
                 )}
 
@@ -620,7 +621,9 @@ export default function PhotoSubmissionPage() {
                               {item.points} / {item.maxPoints}
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-600">{item.comment}</p>
+                          <p className="text-[11px] text-slate-600">
+                            <MathText text={item.comment} />
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -640,9 +643,15 @@ export default function PhotoSubmissionPage() {
                             <strong>
                               {style.label} · Ligne {idx + 1}
                             </strong>
-                            <span className="font-mono text-xs bg-white/80 px-1.5 py-0.5 rounded">{l.text}</span>
+                            <span className="text-xs bg-white/80 px-2 py-0.5 rounded">
+                              <MathText text={l.text} />
+                            </span>
                           </div>
-                          {st?.comment && <span className="block mt-1.5 text-xs">{st.comment}</span>}
+                          {st?.comment && (
+                            <span className="block mt-1.5 text-xs">
+                              <MathText text={st.comment} />
+                            </span>
+                          )}
                         </div>
                       );
                     })}
