@@ -58,9 +58,10 @@ export async function callTextAI(params: {
   system: string;
   messages: { role: "user" | "assistant"; content: string }[];
   maxTokens?: number;
+  jsonMode?: boolean;
 }): Promise<{ text: string; provider: "claude" | "gemini" } | null> {
   const provider = getActiveAIProvider();
-  const maxTokens = params.maxTokens ?? 500;
+  const maxTokens = params.jsonMode ? Math.max(params.maxTokens ?? 800, 800) : (params.maxTokens ?? 500);
 
   if (provider === "claude") {
     const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
@@ -90,7 +91,6 @@ export async function callTextAI(params: {
       new Set([
         process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
-        "gemini-3.8-flash",
       ])
     );
     const contents = params.messages.map((m) => ({
@@ -98,31 +98,50 @@ export async function callTextAI(params: {
       parts: [{ text: m.content }],
     }));
 
+    const generationConfig: Record<string, unknown> = {
+      maxOutputTokens: maxTokens,
+      temperature: params.jsonMode ? 0.15 : 0.4,
+    };
+    if (params.jsonMode) {
+      generationConfig.responseMimeType = "application/json";
+    }
+
     for (const model of models) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-          apiKey
-        )}`;
-        const res = await fetchWithTimeout(
-          url,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: params.system }] },
-              contents,
-              generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 },
-            }),
-          },
-          10000
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) return { text, provider: "gemini" };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
+            apiKey
+          )}`;
+          const res = await fetchWithTimeout(
+            url,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                systemInstruction: { parts: [{ text: params.system }] },
+                contents,
+                generationConfig,
+              }),
+            },
+            10000
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) return { text, provider: "gemini" };
+          } else if (res.status === 429 || res.status === 503) {
+            // Brief backoff before retrying transient rate-limit / overload
+            await new Promise((r) => setTimeout(r, 450 * (attempt + 1)));
+            continue;
+          } else {
+            break;
+          }
+        } catch {
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 300));
+            continue;
+          }
         }
-      } catch {
-        continue;
       }
     }
   }

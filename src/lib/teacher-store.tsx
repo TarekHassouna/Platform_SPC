@@ -98,6 +98,7 @@ interface TeacherStoreContextType {
   addExercise: (ex: Omit<ExerciseItem, "id">) => Promise<ExerciseItem>;
   assignments: AssignmentItem[];
   addAssignment: (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">) => Promise<void>;
+  toggleAssignmentRetry: (assignmentId: string) => Promise<void>;
   copies: CopySubmission[];
   updateCopy: (copyId: string, updates: Partial<CopySubmission>) => void;
 }
@@ -641,6 +642,23 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     setAssignments((prev) => [created, ...prev]);
   };
 
+  const toggleAssignmentRetry = async (assignmentId: string) => {
+    const target = assignments.find((a) => a.id === assignmentId);
+    if (!target) return;
+    const nextVal = !target.allowRetry;
+    setAssignments((prev) =>
+      prev.map((a) => (a.id === assignmentId ? { ...a, allowRetry: nextVal } : a))
+    );
+    const supabase = getSupabaseBrowserClient();
+    if (isSupabaseConfigured && supabase && user?.id) {
+      await supabase
+        .from("assignments")
+        .update({ allow_retry: nextVal })
+        .eq("id", assignmentId)
+        .eq("teacher_id", user.id);
+    }
+  };
+
   const updateCopy = (copyId: string, updates: Partial<CopySubmission>) => {
     setCopies((prev) => prev.map((c) => (c.id === copyId ? { ...c, ...updates } : c)));
   };
@@ -660,6 +678,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         addExercise,
         assignments,
         addAssignment,
+        toggleAssignmentRetry,
         copies,
         updateCopy,
       }}

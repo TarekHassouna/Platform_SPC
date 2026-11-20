@@ -5,7 +5,8 @@ import { useTeacherStore, ExerciseItem } from "@/lib/teacher-store";
 import { TeacherShell } from "@/components/TeacherShell";
 
 export default function TeacherExercisesPage() {
-  const { classes, selectedClassId, exercises, assignments, addAssignment } = useTeacherStore();
+  const { classes, selectedClassId, exercises, assignments, addAssignment, toggleAssignmentRetry } =
+    useTeacherStore();
 
   const [tab, setTab] = useState<"library" | "assignments">("library");
   const [levelFilter, setLevelFilter] = useState<string>("all");
@@ -244,15 +245,18 @@ export default function TeacherExercisesPage() {
                       >
                         Mode {asg.mode}
                       </span>
-                      <span
-                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg ${
+                      <button
+                        type="button"
+                        onClick={() => toggleAssignmentRetry(asg.id)}
+                        title="Cliquer pour autoriser ou bloquer les réessais"
+                        className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg transition-colors cursor-pointer ${
                           asg.allowRetry
-                            ? "bg-slate-100 text-slate-600"
-                            : "bg-amber-100 text-amber-800"
+                            ? "bg-slate-100 text-slate-700 hover:bg-amber-100 hover:text-amber-800"
+                            : "bg-amber-100 text-amber-800 hover:bg-slate-100 hover:text-slate-700"
                         }`}
                       >
-                        {asg.allowRetry ? "🔄 Réessais autorisés" : "🔒 1 seul essai"}
-                      </span>
+                        {asg.allowRetry ? "🔄 Réessais autorisés (cliquer pour bloquer)" : "🔒 1 seul essai (cliquer pour autoriser)"}
+                      </button>
                       <span className="text-xs text-slate-400">Échéance : {asg.dueDate}</span>
                     </div>
                     <h3 className="font-bold text-slate-900">{asg.title}</h3>

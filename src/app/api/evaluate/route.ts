@@ -113,6 +113,254 @@ function countSigFigs(numStr: string): number {
   return Math.max(s.length, 1);
 }
 
+// ============================================================
+// Deterministic Symbolic-Numerical Algebraic Equivalence Engine
+// Safely parses physics formulas (no eval) and verifies identity
+// across 6 distinct test points, handling implicit multiplication
+// (C V_A, RI, mg) and keyboard denominator shorthand (dx/vdt).
+// ============================================================
+type MathToken =
+  | { kind: "num"; value: number }
+  | { kind: "var"; name: string }
+  | { kind: "op"; op: "+" | "-" | "*" | "/" | "^"; implicit?: boolean }
+  | { kind: "lparen" }
+  | { kind: "rparen" };
+
+function extractVarCatalog(expr: string): string[] {
+  const cleaned = expr.toLowerCase().replace(/\*\*/g, "^");
+  const matches = cleaned.match(/[a-z][a-z0-9_]*(?:\([a-z0-9_]+\))?/g) || [];
+  // Also strip function call arg if like x(t) -> x(t) and x
+  const set = new Set<string>();
+  for (const m of matches) {
+    set.add(m);
+    const base = m.replace(/\([a-z0-9_]+\)$/, "");
+    if (base) set.add(base);
+  }
+  return Array.from(set).sort((a, b) => b.length - a.length);
+}
+
+function splitWordIntoVars(word: string, catalog: string[]): string[] | null {
+  if (catalog.includes(word)) return [word];
+  const result: string[] = [];
+  let pos = 0;
+  while (pos < word.length) {
+    let matched: string | null = null;
+    for (const v of catalog) {
+      if (word.startsWith(v, pos)) {
+        matched = v;
+        break;
+      }
+    }
+    if (!matched) return null;
+    result.push(matched);
+    pos += matched.length;
+  }
+  return result.length > 0 ? result : null;
+}
+
+function tokenizeFormula(expr: string, catalog: string[]): MathToken[] | null {
+  const s = normalize(expr).toLowerCase().replace(/\*\*/g, "^").replace(/\s+/g, "");
+  const rawTokens: MathToken[] = [];
+  let i = 0;
+
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === "(") {
+      rawTokens.push({ kind: "lparen" });
+      i++;
+      continue;
+    }
+    if (ch === ")") {
+      rawTokens.push({ kind: "rparen" });
+      i++;
+      continue;
+    }
+    if (ch === "+" || ch === "-" || ch === "*" || ch === "/" || ch === "^") {
+      rawTokens.push({ kind: "op", op: ch });
+      i++;
+      continue;
+    }
+    if (/\d|\./.test(ch)) {
+      const m = s.slice(i).match(/^\d+(?:\.\d+)?(?:e[+-]?\d+)?/);
+      if (!m) return null;
+      rawTokens.push({ kind: "num", value: parseFloat(m[0]) });
+      i += m[0].length;
+      continue;
+    }
+    if (/[a-z]/.test(ch)) {
+      const m = s.slice(i).match(/^[a-z][a-z0-9_]*/);
+      if (!m) return null;
+      const word = m[0];
+      // Check if followed by "(arg)" matching a catalog symbol like x(t) or n_i(acide)
+      let fullWord = word;
+      if (s[i + word.length] === "(") {
+        const argMatch = s.slice(i + word.length).match(/^\([a-z0-9_]+\)/);
+        if (argMatch && catalog.includes(word + argMatch[0])) {
+          fullWord = word + argMatch[0];
+        }
+      }
+      const split = splitWordIntoVars(fullWord, catalog);
+      if (split) {
+        for (const v of split) rawTokens.push({ kind: "var", name: v });
+      } else {
+        rawTokens.push({ kind: "var", name: fullWord });
+      }
+      i += fullWord.length;
+      continue;
+    }
+    return null; // Unsupported character
+  }
+
+  // Insert implicit multiplication tokens where adjacent values/parens meet
+  const out: MathToken[] = [];
+  for (let idx = 0; idx < rawTokens.length; idx++) {
+    const curr = rawTokens[idx];
+    if (out.length > 0) {
+      const prev = out[out.length - 1];
+      const prevIsVal = prev.kind === "num" || prev.kind === "var" || prev.kind === "rparen";
+      const currIsVal = curr.kind === "num" || curr.kind === "var" || curr.kind === "lparen";
+      if (prevIsVal && currIsVal) {
+        out.push({ kind: "op", op: "*", implicit: true });
+      }
+    }
+    out.push(curr);
+  }
+  return out;
+}
+
+function evaluateTokens(
+  tokens: MathToken[],
+  env: Record<string, number>,
+  tightImplicitMul: boolean
+): number | null {
+  let pos = 0;
+
+  const peek = () => tokens[pos];
+  const consume = () => tokens[pos++];
+
+  function parseAddSub(): number {
+    let left = parseMulDiv();
+    while (peek()?.kind === "op" && (peek() as { op: string }).op.match(/^[+-]$/)) {
+      const op = (consume() as { op: "+" | "-" }).op;
+      const right = parseMulDiv();
+      left = op === "+" ? left + right : left - right;
+    }
+    return left;
+  }
+
+  function parseMulDiv(): number {
+    let left = tightImplicitMul ? parseImplicitMul() : parseUnary();
+    while (
+      peek()?.kind === "op" &&
+      ((peek() as { op: string; implicit?: boolean }).op === "*" ||
+        (peek() as { op: string; implicit?: boolean }).op === "/") &&
+      !(tightImplicitMul && (peek() as { implicit?: boolean }).implicit)
+    ) {
+      const op = (consume() as { op: "*" | "/" }).op;
+      const right = tightImplicitMul ? parseImplicitMul() : parseUnary();
+      left = op === "*" ? left * right : left / right;
+    }
+    return left;
+  }
+
+  function parseImplicitMul(): number {
+    let left = parseUnary();
+    while (
+      peek()?.kind === "op" &&
+      (peek() as { op: string; implicit?: boolean }).op === "*" &&
+      (peek() as { implicit?: boolean }).implicit
+    ) {
+      consume();
+      left *= parseUnary();
+    }
+    return left;
+  }
+
+  function parseUnary(): number {
+    if (peek()?.kind === "op" && ((peek() as { op: string }).op === "+" || (peek() as { op: string }).op === "-")) {
+      const op = (consume() as { op: "+" | "-" }).op;
+      const val = parseUnary();
+      return op === "-" ? -val : val;
+    }
+    return parsePow();
+  }
+
+  function parsePow(): number {
+    const base = parsePrimary();
+    if (peek()?.kind === "op" && (peek() as { op: string }).op === "^") {
+      consume();
+      const exp = parseUnary();
+      return Math.pow(base, exp);
+    }
+    return base;
+  }
+
+  function parsePrimary(): number {
+    const tok = consume();
+    if (!tok) throw new Error("EOF");
+    if (tok.kind === "num") return tok.value;
+    if (tok.kind === "var") {
+      if (!(tok.name in env)) throw new Error("Unknown var");
+      return env[tok.name];
+    }
+    if (tok.kind === "lparen") {
+      const val = parseAddSub();
+      if (peek()?.kind !== "rparen") throw new Error("Missing )");
+      consume();
+      return val;
+    }
+    throw new Error("Unexpected token");
+  }
+
+  try {
+    const val = parseAddSub();
+    if (pos !== tokens.length || !Number.isFinite(val)) return null;
+    return val;
+  } catch {
+    return null;
+  }
+}
+
+function checkSymbolicEquivalence(
+  studentRhs: string,
+  expectedRhs: string
+): "exact" | "denominator_parens" | "different" {
+  const catalog = extractVarCatalog(expectedRhs);
+  const expTokens = tokenizeFormula(expectedRhs, catalog);
+  const stuTokens = tokenizeFormula(studentRhs, catalog);
+  if (!expTokens || !stuTokens || expTokens.length === 0 || stuTokens.length === 0) {
+    return "different";
+  }
+
+  // Collect all variables across both expressions
+  const allVars = Array.from(
+    new Set([
+      ...expTokens.filter((t): t is { kind: "var"; name: string } => t.kind === "var").map((t) => t.name),
+      ...stuTokens.filter((t): t is { kind: "var"; name: string } => t.kind === "var").map((t) => t.name),
+    ])
+  );
+
+  // Deterministic pseudo-random positive test vectors (no zero-division, non-commensurate values)
+  const testWithMode = (tightImplicitMul: boolean): boolean => {
+    for (let trial = 0; trial < 6; trial++) {
+      const env: Record<string, number> = {};
+      allVars.forEach((v, idx) => {
+        env[v] = 1.37 + ((idx + 1) * 1.91 + trial * 2.73) % 7.89 + (idx * 0.173);
+      });
+      const eVal = evaluateTokens(expTokens, env, false);
+      const sVal = evaluateTokens(stuTokens, env, tightImplicitMul);
+      if (eVal === null || sVal === null) return false;
+      const denom = Math.max(Math.abs(eVal), 1e-9);
+      if (Math.abs(eVal - sVal) / denom > 1e-5) return false;
+    }
+    return true;
+  };
+
+  if (testWithMode(false)) return "exact";
+  if (testWithMode(true)) return "denominator_parens";
+  return "different";
+}
+
 function fallbackEvaluate(body: EvaluatePayload) {
   const raw = normalize(body.student_answer || "");
   const expectedDisplay = body.unit ? `${body.expected.replace(".", ",")} ${body.unit}` : body.expected;
@@ -154,7 +402,33 @@ function fallbackEvaluate(body: EvaluatePayload) {
         max_score: 1,
         explanation: "Correct ! Expression littérale équivalente à la relation attendue.",
         expected_display: expectedDisplay,
-        engine: "ts_fallback",
+        engine: "ts_symbolic",
+      };
+    }
+
+    // Deterministic algebraic equivalence check across 6 test points
+    const symEq = checkSymbolicEquivalence(studentRhs, expectedRhs);
+    if (symEq === "exact") {
+      return {
+        status: "correct",
+        score: 1,
+        max_score: 1,
+        explanation: "Correct ! Ton écriture est algébriquement équivalente à la formule attendue.",
+        expected_display: expectedDisplay,
+        engine: "ts_symbolic",
+      };
+    }
+    if (symEq === "denominator_parens") {
+      return {
+        status: "partially_correct",
+        score: 0.9,
+        max_score: 1,
+        error_code: "erreur_notation",
+        error_category: "Communication",
+        explanation:
+          "Bonne relation physique ! Pense à ajouter des parenthèses au dénominateur (et à respecter les majuscules/minuscules des grandeurs) pour éviter toute ambiguïté d'écriture.",
+        expected_display: expectedDisplay,
+        engine: "ts_symbolic",
       };
     }
 
@@ -362,7 +636,8 @@ export async function POST(req: NextRequest) {
           content: `Question : ${body.question_prompt || ""}\nAttendu / barème : ${body.expected}\nRéponse de l'élève : ${body.student_answer}`,
         },
       ],
-      maxTokens: 300,
+      maxTokens: 800,
+      jsonMode: true,
     });
 
     if (aiRes?.text) {
@@ -452,7 +727,8 @@ export async function POST(req: NextRequest) {
           content: `Question : ${body.question_prompt || ""}\nFormule attendue : ${body.expected}\nRéponse de l'élève : ${body.student_answer}`,
         },
       ],
-      maxTokens: 280,
+      maxTokens: 800,
+      jsonMode: true,
     });
 
     if (aiCheck?.text) {
