@@ -4,6 +4,8 @@ import { callTextAI } from "@/lib/ai-provider";
 interface AnalyzePayload {
   mode: "question" | "correct" | "grade";
   questionText?: string;
+  referenceCorrection?: string;
+  assignmentTitle?: string;
   lines: { id: number; text: string }[];
 }
 
@@ -72,10 +74,22 @@ export async function POST(req: NextRequest) {
         "Si 'hasStudentWork' est true, vérifie chaque ligne rédigée par l'élève, pointe clairement la PREMIÈRE erreur physique/mathématique/d'unité, explique pourquoi c'est faux, et donne la bonne démarche dans 'tutorReply' ('maxScore': 10). " +
         "Si 'hasStudentWork' est false (énoncé sans réponse), mets 'score': null, 'status': 'no_work', et invite l'élève à rédiger d'abord sa réponse ou à utiliser le mode 'J'ai une question'.";
 
+  const referenceBlock = body.referenceCorrection?.trim()
+    ? `\nCORRIGÉ OFFICIEL & BARÈME DU PROFESSEUR (SOURCE DE VÉRITÉ ABSOLUE POUR NOTER CETTE COPIE${
+        body.assignmentTitle ? ` — ${body.assignmentTitle}` : ""
+      }) :\n${body.referenceCorrection.trim()}\nCompare strictement les réponses de l'élève à ce corrigé officiel et applique exactement ce barème et ces méthodes attendues.\n`
+    : "";
+
+  const diagramRule =
+    "Si un petit schéma explicatif aide à comprendre (circuit, forces, titrage, optique), tu peux inclure un bloc ```svg ... ``` (viewBox=\"0 0 340 180\") dans 'tutorReply'. ";
+
   const system =
     "Tu es un professeur agrégé de Physique-Chimie au lycée français. Tu analyses la transcription d'une photo soumise par un élève. " +
     baseDetectionRule +
+    referenceBlock +
     modeInstruction +
+    " " +
+    diagramRule +
     " Retourne UNIQUEMENT un JSON valide : " +
     '{"hasStudentWork":true|false,"status":"correct"|"partially_correct"|"incorrect"|"no_work","score":null|number,"maxScore":10|20,"errorCode":null|"formule_inversee"|"erreur_calcul"|"unite_manquante"|"conversion_unites"|"chiffres_significatifs"|"erreur_conceptuelle","summary":"bilan court en français","tutorReply":"explication ou réponse pédagogique claire en français","rubricBreakdown":[{"criterion":"...","points":0,"maxPoints":5,"comment":"..."}],"steps":[{"lineId":1,"verdict":"correct"|"error"|"partial"|"info","comment":"explication courte en français"}]}';
 

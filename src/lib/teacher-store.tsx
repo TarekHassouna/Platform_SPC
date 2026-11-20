@@ -78,6 +78,8 @@ export interface AssignmentItem {
   exerciseIds: string[];
   dueDate: string;
   mode: "Entraînement" | "Noté";
+  submissionType: "online" | "photo_copy";
+  referenceCorrection?: string;
   allowRetry: boolean;
   allowHints: boolean;
   isVisible: boolean;
@@ -89,6 +91,7 @@ export interface AssignmentItem {
 export interface CopySubmission {
   id: string;
   studentId: string;
+  assignmentId?: string;
   evaluationResultId?: string;
   studentName: string;
   classId: string;
@@ -121,7 +124,18 @@ interface TeacherStoreContextType {
   addExercise: (ex: Omit<ExerciseItem, "id">) => Promise<ExerciseItem>;
   toggleExerciseStudentBank: (exerciseId: string) => Promise<void>;
   assignments: AssignmentItem[];
-  addAssignment: (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">) => Promise<void>;
+  addAssignment: (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents" | "submissionType">) => Promise<void>;
+  announcePhotoCopyAssignment: (params: {
+    classId: string;
+    title: string;
+    dueDate?: string;
+    referenceCorrection: string;
+    isVisible?: boolean;
+  }) => Promise<{ ok: boolean; error?: string }>;
+  updateAssignmentReferenceCorrection: (
+    assignmentId: string,
+    referenceCorrection: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   toggleAssignmentRetry: (assignmentId: string) => Promise<void>;
   toggleAssignmentHints: (assignmentId: string) => Promise<void>;
   toggleAssignmentVisibility: (assignmentId: string) => Promise<void>;
@@ -356,6 +370,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
             realPhotoCopies.push({
               id: String(s.id),
               studentId: sid,
+              assignmentId: asgId || undefined,
               evaluationResultId: ev?.id ? String(ev.id) : undefined,
               studentName: p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : "Élève",
               classId: studentClass ? String(studentClass.id) : "",
@@ -532,6 +547,10 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           const allowHints =
             typeof a.allow_hints === "boolean" ? a.allow_hints : !isGraded;
           const isVisible = typeof a.is_visible === "boolean" ? a.is_visible : true;
+          const submissionType: "online" | "photo_copy" =
+            a.submission_type === "photo_copy" ? "photo_copy" : "online";
+          const referenceCorrection =
+            typeof a.reference_correction === "string" ? a.reference_correction : undefined;
           const timeLimitMinutes =
             typeof a.time_limit_minutes === "number" && a.time_limit_minutes > 0
               ? a.time_limit_minutes
@@ -546,6 +565,8 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
               ? new Date(String(a.due_at)).toLocaleDateString("fr-FR")
               : "Sans date limite",
             mode: isGraded ? "Noté" : "Entraînement",
+            submissionType,
+            referenceCorrection,
             allowRetry,
             allowHints,
             isVisible,
@@ -750,7 +771,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
   };
 
   const addAssignment = async (
-    asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">
+    asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents" | "submissionType">
   ) => {
     const supabase = getSupabaseBrowserClient();
     const cls = classes.find((c) => c.id === asg.classId);
@@ -818,10 +839,99 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     const created: AssignmentItem = {
       ...asg,
       id: newId,
+      submissionType: "online",
       completedCount: 0,
       totalStudents: cls?.students.length || 0,
     };
     setAssignments((prev) => [created, ...prev]);
+  };
+
+  const announcePhotoCopyAssignment = async (params: {
+    classId: string;
+    title: string;
+    dueDate?: string;
+    referenceCorrection: string;
+    isVisible?: boolean;
+  }): Promise<{ ok: boolean; error?: string }> => {
+    const supabase = getSupabaseBrowserClient();
+    const cls = classes.find((c) => c.id === params.classId);
+    const visible = params.isVisible !== false;
+
+    if (!isSupabaseConfigured || !supabase || !user?.id) {
+      return { ok: false, error: "Connexion Supabase requise." };
+    }
+
+    const { data, error } = await supabase
+      .from("assignments")
+      .insert({
+        class_id: params.classId,
+        teacher_id: user.id,
+        title: params.title.trim(),
+        exercise_version_ids: [],
+        mode: "graded",
+        allow_retry: false,
+        allow_hints: false,
+        is_visible: visible,
+        submission_type: "photo_copy",
+        reference_correction: params.referenceCorrection.trim() || null,
+      })
+      .select("id")
+      .single();
+
+    if (error || !data?.id) {
+      if (
+        error?.message?.includes("submission_type") ||
+        error?.message?.includes("reference_correction")
+      ) {
+        return {
+          ok: false,
+          error:
+            "Exécute d'abord supabase/photo_assignments.sql dans Supabase SQL Editor pour activer les dépôts de copies papier.",
+        };
+      }
+      return { ok: false, error: error?.message || "Erreur lors de l'annonce du dépôt de copie." };
+    }
+
+    const created: AssignmentItem = {
+      id: String(data.id),
+      title: params.title.trim(),
+      classId: params.classId,
+      exerciseIds: [],
+      dueDate: params.dueDate || "Sans date limite",
+      mode: "Noté",
+      submissionType: "photo_copy",
+      referenceCorrection: params.referenceCorrection.trim() || undefined,
+      allowRetry: false,
+      allowHints: false,
+      isVisible: visible,
+      timeLimitMinutes: null,
+      completedCount: 0,
+      totalStudents: cls?.students.length || 0,
+    };
+    setAssignments((prev) => [created, ...prev]);
+    return { ok: true };
+  };
+
+  const updateAssignmentReferenceCorrection = async (
+    assignmentId: string,
+    referenceCorrection: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    const clean = referenceCorrection.trim();
+    setAssignments((prev) =>
+      prev.map((a) => (a.id === assignmentId ? { ...a, referenceCorrection: clean } : a))
+    );
+    const supabase = getSupabaseBrowserClient();
+    if (isSupabaseConfigured && supabase && user?.id) {
+      const { error } = await supabase
+        .from("assignments")
+        .update({ reference_correction: clean || null })
+        .eq("id", assignmentId)
+        .eq("teacher_id", user.id);
+      if (error) {
+        return { ok: false, error: error.message };
+      }
+    }
+    return { ok: true };
   };
 
   const toggleAssignmentRetry = async (assignmentId: string) => {
@@ -1050,6 +1160,8 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         toggleExerciseStudentBank,
         assignments,
         addAssignment,
+        announcePhotoCopyAssignment,
+        updateAssignmentReferenceCorrection,
         toggleAssignmentRetry,
         toggleAssignmentHints,
         toggleAssignmentVisibility,

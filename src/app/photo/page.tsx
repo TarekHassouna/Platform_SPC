@@ -1,9 +1,14 @@
 "use client";
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { uploadStudentPhoto, recordPhotoSubmission } from "@/lib/db";
+import {
+  fetchStudentDashboardData,
+  uploadStudentPhoto,
+  recordPhotoSubmission,
+  type ClassAssignmentRow,
+} from "@/lib/db";
 import { MathText } from "@/components/MathText";
 
 type PhotoMode = "question" | "correct" | "grade";
@@ -107,12 +112,16 @@ const MODE_CONFIG: Record<
   },
 };
 
-export default function PhotoSubmissionPage() {
+function PhotoSubmissionContent() {
   const { user, logout } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialCopyId = searchParams.get("copyAssignmentId") || "";
 
-  const [mode, setMode] = useState<PhotoMode>("correct");
+  const [mode, setMode] = useState<PhotoMode>(initialCopyId ? "grade" : "correct");
   const [step, setStep] = useState<"upload" | "confirm" | "result">("upload");
+  const [photoDrops, setPhotoDrops] = useState<ClassAssignmentRow[]>([]);
+  const [selectedDropId, setSelectedDropId] = useState<string>(initialCopyId);
   const [lines, setLines] = useState<TranscribedLine[]>([]);
   const [studentQuestion, setStudentQuestion] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
@@ -125,6 +134,19 @@ export default function PhotoSubmissionPage() {
   const [savedToDb, setSavedToDb] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!user?.id) return;
+    fetchStudentDashboardData(user.id).then((d) => {
+      const drops = d.assignments.filter((a) => a.submissionType === "photo_copy");
+      setPhotoDrops(drops);
+      if (initialCopyId && drops.some((x) => x.id === initialCopyId)) {
+        setSelectedDropId(initialCopyId);
+        setMode("grade");
+      }
+    });
+  }, [user?.id, initialCopyId]);
+
+  const selectedDrop = photoDrops.find((d) => d.id === selectedDropId) || null;
   const cfg = MODE_CONFIG[mode];
 
   const resetAll = () => {
@@ -193,6 +215,8 @@ export default function PhotoSubmissionPage() {
         body: JSON.stringify({
           mode: activeMode,
           questionText: studentQuestion,
+          assignmentTitle: activeMode === "grade" ? selectedDrop?.title : undefined,
+          referenceCorrection: activeMode === "grade" ? selectedDrop?.referenceCorrection : undefined,
           lines: lines.map((l) => ({ id: l.id, text: l.text })),
         }),
       });
@@ -210,18 +234,19 @@ export default function PhotoSubmissionPage() {
       return;
     }
 
-    // ONLY record a graded copy in Supabase if:
-    // 1) mode is 'correct' or 'grade' (NOT 'question' tutor help), AND
-    // 2) the photo actually contains student answers (hasStudentWork === true)!
+    // Record a graded copy in Supabase when mode is 'grade' (linked to announced copy drop) or 'correct'
     if (
       user?.id &&
       result &&
       activeMode !== "question" &&
       result.hasStudentWork &&
-      result.score !== null
+      result.score !== null &&
+      (activeMode === "correct" || Boolean(selectedDrop))
     ) {
       const saved = await recordPhotoSubmission({
         studentId: user.id,
+        assignmentId: activeMode === "grade" ? selectedDrop?.id : undefined,
+        assignmentTitle: activeMode === "grade" ? selectedDrop?.title : undefined,
         fileName: fileName || "copie_manuscrite.jpg",
         storagePath,
         mode: activeMode,
@@ -237,6 +262,15 @@ export default function PhotoSubmissionPage() {
         },
       });
       setSavedToDb(saved.ok);
+      if (saved.ok && activeMode === "grade" && selectedDrop) {
+        setPhotoDrops((prev) =>
+          prev.map((d) =>
+            d.id === selectedDrop.id
+              ? { ...d, completed: true, bestScore: result!.score ?? 0, maxScore: result!.maxScore }
+              : d
+          )
+        );
+      }
     }
     setAnalyzing(false);
     setStep("result");
@@ -318,6 +352,57 @@ export default function PhotoSubmissionPage() {
           </div>
         )}
 
+        {/* Teacher-Announced Paper Copy Drops */}
+        {photoDrops.length > 0 && (
+          <div className="mb-6 bg-emerald-50/70 border border-emerald-200 rounded-3xl p-5">
+            <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+              <h2 className="text-sm font-extrabold text-emerald-950">
+                📥 Copies papier demandées par ton professeur ({photoDrops.length})
+              </h2>
+              <span className="text-[11px] font-semibold text-emerald-700">
+                Clique sur un devoir pour y déposer ta copie notée sur 20
+              </span>
+            </div>
+            <div className="grid sm:grid-cols-2 gap-2.5 max-h-48 overflow-y-auto pr-1">
+              {photoDrops.map((drop) => {
+                const isChosen = selectedDropId === drop.id && mode === "grade";
+                return (
+                  <button
+                    key={drop.id}
+                    type="button"
+                    disabled={step === "result"}
+                    onClick={() => {
+                      setSelectedDropId(drop.id);
+                      setMode("grade");
+                    }}
+                    className={`text-left rounded-2xl p-3.5 border transition-all ${
+                      isChosen
+                        ? "bg-white border-emerald-500 ring-2 ring-emerald-200 shadow-xs"
+                        : "bg-white/90 border-emerald-100 hover:border-emerald-300"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-[11px] font-bold text-emerald-700">{drop.className}</span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          drop.completed
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {drop.completed
+                          ? `✅ Rendue${drop.bestScore !== undefined ? ` · ${drop.bestScore}/${drop.maxScore}` : ""}`
+                          : "⏳ À rendre"}
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-slate-900 truncate">{drop.title}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Mode selector — active even in step 2 so user can switch before analyzing */}
         <div className="grid sm:grid-cols-3 gap-3 mb-7">
           {(["question", "correct", "grade"] as PhotoMode[]).map((mKey) => {
@@ -380,8 +465,27 @@ export default function PhotoSubmissionPage() {
               <div className="inline-block text-[11px] font-bold uppercase tracking-wider px-3 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 mb-3">
                 Mode actif : {cfg.title} · {cfg.badge}
               </div>
-              <h2 className="font-extrabold text-slate-900 text-base mb-1">{cfg.uploadTitle}</h2>
-              <p className="text-xs text-slate-600 max-w-lg mx-auto mb-6">{cfg.uploadHint}</p>
+              <h2 className="font-extrabold text-slate-900 text-base mb-1">
+                {mode === "grade" && selectedDrop
+                  ? `Dépôt de copie : ${selectedDrop.title}`
+                  : cfg.uploadTitle}
+              </h2>
+              <p className="text-xs text-slate-600 max-w-lg mx-auto mb-6">
+                {mode === "grade" && selectedDrop
+                  ? selectedDrop.referenceCorrection
+                    ? "L'IA corrigera ta copie selon le barème officiel défini par ton professeur et lui transmettra ta note."
+                    : "Ta copie sera analysée sur 20 et transmise dans l'espace de ton professeur."
+                  : cfg.uploadHint}
+              </p>
+
+              {mode === "grade" && !selectedDrop && (
+                <div className="max-w-lg mx-auto mb-6 bg-amber-50 border border-amber-300 rounded-2xl p-4 text-left text-xs text-amber-950">
+                  <strong>🔒 Dépôt de copie réservé aux devoirs annoncés :</strong>{" "}
+                  {photoDrops.length > 0
+                    ? "Sélectionne d'abord le devoir demandé par ton professeur dans l'encadré vert ci-dessus."
+                    : "Ton professeur n'a pas encore annoncé de dépôt de copie papier pour ta classe. En attendant, tu peux utiliser « ❓ J'ai une question » ou « ✍️ Corrige-moi » librement !"}
+                </div>
+              )}
 
               {mode === "question" && (
                 <div className="max-w-lg mx-auto mb-6 text-left space-y-2">
@@ -416,7 +520,9 @@ export default function PhotoSubmissionPage() {
 
               <label
                 className={`inline-block cursor-pointer text-white font-bold px-6 py-3 rounded-xl transition-colors text-sm shadow-md ${cfg.accentBtn} ${
-                  uploading ? "opacity-60 pointer-events-none" : ""
+                  uploading || (mode === "grade" && !selectedDrop)
+                    ? "opacity-50 pointer-events-none"
+                    : ""
                 }`}
               >
                 {uploading ? "⏳ Lecture de ta photo par Gemini Vision…" : cfg.uploadCta}
@@ -424,7 +530,7 @@ export default function PhotoSubmissionPage() {
                   type="file"
                   accept="image/*"
                   capture="environment"
-                  disabled={uploading}
+                  disabled={uploading || (mode === "grade" && !selectedDrop)}
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
@@ -719,5 +825,19 @@ export default function PhotoSubmissionPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function PhotoSubmissionPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-500">
+          Chargement…
+        </div>
+      }
+    >
+      <PhotoSubmissionContent />
+    </Suspense>
   );
 }

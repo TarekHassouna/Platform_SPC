@@ -196,7 +196,9 @@ export default function ExerciseCatalogPage() {
                     <Link
                       key={a.id}
                       href={
-                        a.targetExerciseId
+                        a.submissionType === "photo_copy"
+                          ? `/photo?copyAssignmentId=${a.id}`
+                          : a.targetExerciseId
                           ? `/exercises/${a.targetExerciseId}?assignmentId=${a.id}`
                           : "/exercises"
                       }
@@ -208,7 +210,7 @@ export default function ExerciseCatalogPage() {
                     >
                       <div className="min-w-0">
                         <div className="text-xs font-bold text-indigo-600 flex items-center gap-1.5 flex-wrap">
-                          <span>{a.className} · {a.mode}</span>
+                          <span>{a.className} · {a.submissionType === "photo_copy" ? "📸 Copie papier" : a.mode}</span>
                           {a.completed && pct !== null && (
                             <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
                               ✅ {a.bestScore?.toFixed(1)}/{a.maxScore} ({pct}%)

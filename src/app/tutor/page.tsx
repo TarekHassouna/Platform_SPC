@@ -107,9 +107,9 @@ export default function StudentTutorPage() {
             assistantContent ||
             "J'ai bien chargé l'énoncé et ta copie depuis ta photo. Quelle question ou étape veux-tu approfondir ?",
           suggestedFollowUp: [
+            "📐 Fais-moi un schéma explicatif de cet exercice",
             "Explique-moi la première étape plus simplement",
             "Vérifie ma proposition de calcul",
-            "Quelle formule dois-je utiliser pour la suite ?",
           ],
         },
       ]);

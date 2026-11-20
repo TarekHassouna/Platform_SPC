@@ -48,6 +48,8 @@ export interface ClassAssignmentRow {
   title: string;
   className: string;
   mode: string;
+  submissionType: "online" | "photo_copy";
+  referenceCorrection?: string;
   allowRetry: boolean;
   allowHints: boolean;
   timeLimitMinutes: number | null;
@@ -342,12 +344,18 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
           : null;
 
       const doneInfo = subByAssignment.get(String(a.id));
+      const submissionType: "online" | "photo_copy" =
+        a.submission_type === "photo_copy" ? "photo_copy" : "online";
+      const referenceCorrection =
+        typeof a.reference_correction === "string" ? a.reference_correction : undefined;
 
       return {
         id: String(a.id),
         title: String(a.title),
         className: enrolledClasses.find((c) => c.id === a.class_id)?.name || "Classe",
         mode: isGraded ? "Noté" : "Entraînement",
+        submissionType,
+        referenceCorrection,
         allowRetry,
         allowHints,
         timeLimitMinutes,
@@ -616,6 +624,8 @@ export async function uploadStudentPhoto(
  */
 export async function recordPhotoSubmission(params: {
   studentId: string;
+  assignmentId?: string;
+  assignmentTitle?: string;
   fileName: string;
   storagePath?: string | null;
   mode: "question" | "correct" | "grade";
@@ -632,14 +642,18 @@ export async function recordPhotoSubmission(params: {
   const supabase = getSupabaseBrowserClient();
   if (!isSupabaseConfigured || !supabase || !params.studentId) return { ok: false };
 
+  const isUuid = (v?: string) =>
+    Boolean(v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v));
+
   const expiresAt = new Date(Date.now() + 90 * 86400 * 1000).toISOString();
   const { data: sub, error } = await supabase
     .from("submissions")
     .insert({
       student_id: params.studentId,
+      assignment_id: isUuid(params.assignmentId) ? params.assignmentId : null,
       input_mode: "photo",
       rendered_params: {
-        exerciseTitle: `Copie manuscrite (${params.fileName})`,
+        exerciseTitle: params.assignmentTitle || `Copie manuscrite (${params.fileName})`,
         mode: params.mode,
       },
       raw_answers: { lines: params.lines, steps: params.analysis?.steps || [] },

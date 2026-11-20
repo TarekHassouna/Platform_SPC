@@ -64,12 +64,13 @@ export async function POST(req: NextRequest) {
 
   const systemPrompt = [
     "Tu es un tuteur bienveillant et rigoureux de Physique-Chimie pour lycéens français (Seconde, Première, Terminale).",
-    "Réponds toujours en français clair, concis (3–5 phrases max), avec des formules LaTeX entourées de $...$.",
+    "Réponds toujours en français clair, concis (3–6 phrases), avec des formules LaTeX entourées de $...$.",
+    "SCHÉMAS VISUELS : Quand un schéma aide vraiment à comprendre (bilan des forces, circuit électrique U/R/I, montage de titrage, réfraction optique, graphique v(t) ou pH(V), chaîne énergétique) ou quand l'élève demande un schéma, ajoute un bloc ```svg ... ``` contenant un schéma SVG propre et lisible (viewBox=\"0 0 360 200\", fond transparent ou blanc, traits nets #1e293b / #4f46e5 / #e11d48, flèches avec <marker>, légendes courtes en français, sans texte qui se chevauche).",
     payload.mode === "guide"
       ? "Approche socratique : NE DONNE PAS la réponse finale tout de suite. Pose une question guidée ou donne un premier indice."
       : payload.mode === "quiz"
       ? "Mode quiz rapide : pose une courte question de vérification et attends la réponse de l'élève."
-      : "Mode explication : explique clairement le concept et donne un court exemple chiffré.",
+      : "Mode explication : explique clairement le concept (avec un schéma SVG si pertinent) et donne un court exemple chiffré.",
     `Chapitre : ${payload.chapterTitle}.`,
     payload.lessonContext ? `Cours vérifié de référence : ${payload.lessonContext}` : "",
     payload.exerciseStatement ? `Énoncé en cours : ${payload.exerciseStatement}` : "",
@@ -82,7 +83,7 @@ export async function POST(req: NextRequest) {
     const aiRes = await callTextAI({
       system: systemPrompt,
       messages: payload.messages.slice(-10),
-      maxTokens: 450,
+      maxTokens: 1400,
     });
 
     if (aiRes) {

@@ -312,7 +312,7 @@ export default function DashboardPage() {
                           >
                             <div className="min-w-0">
                               <div className="text-xs font-bold text-indigo-700 mb-1 flex items-center gap-1.5 flex-wrap">
-                                <span>{asg.className} · {asg.mode}</span>
+                                <span>{asg.className} · {asg.submissionType === "photo_copy" ? "📸 Copie papier" : asg.mode}</span>
                                 {asg.completed && pct !== null && (
                                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
                                     ✅ {asg.bestScore?.toFixed(1)}/{asg.maxScore} ({pct}%)
@@ -342,7 +342,9 @@ export default function DashboardPage() {
                             </div>
                             <Link
                               href={
-                                asg.targetExerciseId
+                                asg.submissionType === "photo_copy"
+                                  ? `/photo?copyAssignmentId=${asg.id}`
+                                  : asg.targetExerciseId
                                   ? `/exercises/${asg.targetExerciseId}?assignmentId=${asg.id}`
                                   : "/exercises"
                               }
