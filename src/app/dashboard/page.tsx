@@ -270,7 +270,7 @@ export default function DashboardPage() {
                         <div className="font-bold text-slate-900">{asg.title}</div>
                       </div>
                       <Link
-                        href="/exercises"
+                        href={asg.targetExerciseId ? `/exercises/${asg.targetExerciseId}` : "/exercises"}
                         className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 whitespace-nowrap"
                       >
                         Ouvrir →

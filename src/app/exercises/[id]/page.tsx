@@ -1,10 +1,14 @@
 "use client";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getExerciseById, CURRICULUM_EXERCISES } from "@/lib/curriculum-bank";
-import { recordExerciseSubmission } from "@/lib/db";
+import {
+  fetchDatabaseExercise,
+  recordExerciseSubmission,
+  type DatabaseExerciseRecord,
+} from "@/lib/db";
 import { MathText } from "@/components/MathText";
 import { MathKeypad } from "@/components/MathKeypad";
 
@@ -19,16 +23,133 @@ type EvalResult = {
   engine: string;
 };
 
+interface NormalizedQuestion {
+  id: string;
+  type: "expression" | "quantity" | "free_text";
+  prompt: string;
+  placeholder: string;
+  expected: string;
+  unit?: string;
+  sig_figs?: number;
+  target_symbol?: string;
+  hint: string;
+  misconceptions?: { expr: string; code: string; explanation: string }[];
+}
+
+interface NormalizedExercise {
+  id: string;
+  title: string;
+  level: string;
+  domain: string;
+  chapter: string;
+  conceptCodes: string[];
+  lessonTitle?: string;
+  lessonContent?: string;
+  workedExample?: string;
+  statement: string;
+  params: Record<string, unknown>;
+  questions: NormalizedQuestion[];
+  isRandomizable: boolean;
+}
+
+function mapDbQuestionType(rawType: string): "expression" | "quantity" | "free_text" {
+  const lower = (rawType || "").toLowerCase();
+  if (lower.includes("expression")) return "expression";
+  if (lower.includes("grandeur") || lower.includes("quantity") || lower.includes("num")) return "quantity";
+  return "free_text";
+}
+
 function ExerciseRunnerContent() {
   const params = useParams();
   const router = useRouter();
   const { user, logout } = useAuth();
 
-  const exerciseId = String(params?.id || "ohm-001");
-  const template = getExerciseById(exerciseId) || CURRICULUM_EXERCISES[0];
+  const exerciseId = String(params?.id || "");
+  const officialTemplate = getExerciseById(exerciseId);
+
+  const [dbExercise, setDbExercise] = useState<DatabaseExerciseRecord | null>(null);
+  const [loadingDb, setLoadingDb] = useState(!officialTemplate);
+  const [notFound, setNotFound] = useState(false);
 
   const [seed, setSeed] = useState(0);
-  const instance = useMemo(() => template.generate(seed), [template, seed]);
+
+  useEffect(() => {
+    if (officialTemplate) {
+      setLoadingDb(false);
+      setNotFound(false);
+      return;
+    }
+    let active = true;
+    setLoadingDb(true);
+    fetchDatabaseExercise(exerciseId).then((rec) => {
+      if (!active) return;
+      if (rec) {
+        setDbExercise(rec);
+        setNotFound(false);
+      } else {
+        setNotFound(true);
+      }
+      setLoadingDb(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [exerciseId, officialTemplate]);
+
+  const activeExercise: NormalizedExercise | null = useMemo(() => {
+    if (officialTemplate) {
+      const inst = officialTemplate.generate(seed);
+      return {
+        id: officialTemplate.id,
+        title: officialTemplate.title,
+        level: officialTemplate.level,
+        domain: officialTemplate.domain,
+        chapter: officialTemplate.chapter,
+        conceptCodes: officialTemplate.conceptCodes,
+        lessonTitle: officialTemplate.lessonTitle,
+        lessonContent: officialTemplate.lessonContent,
+        workedExample: officialTemplate.workedExample,
+        statement: inst.statement,
+        params: inst.params,
+        questions: inst.questions,
+        isRandomizable: true,
+      };
+    }
+
+    if (dbExercise) {
+      return {
+        id: dbExercise.id,
+        title: dbExercise.title,
+        level: dbExercise.level,
+        domain: dbExercise.domain,
+        chapter: dbExercise.chapter,
+        conceptCodes: [],
+        statement: dbExercise.statement,
+        params: { versionId: dbExercise.versionId },
+        questions: dbExercise.questions.map((q, idx) => {
+          const qType = mapDbQuestionType(q.type);
+          return {
+            id: `q${idx + 1}`,
+            type: qType,
+            prompt: `${idx + 1}. ${q.prompt}`,
+            placeholder:
+              qType === "free_text"
+                ? "Rédige ta démarche ou justification ici…"
+                : qType === "expression"
+                ? "Écris ton expression littérale…"
+                : "Écris la valeur suivie de son unité…",
+            expected: q.expected,
+            hint: q.misconception
+              ? `Point d'attention : ${q.misconception}`
+              : "Relis bien les données et les unités de l'énoncé.",
+          };
+        }),
+        isRandomizable: false,
+      };
+    }
+
+    return null;
+  }, [officialTemplate, dbExercise, seed]);
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [activeInputId, setActiveInputId] = useState<string>("q1");
@@ -45,23 +166,26 @@ function ExerciseRunnerContent() {
   >([
     {
       role: "assistant",
-      content: `Bonjour ! Je suis ton tuteur IA pour « ${template.title} ». Pose-moi une question si tu bloques — je te guide étape par étape.`,
+      content:
+        "Bonjour ! Je suis ton tuteur IA pour cet exercice. Pose-moi une question si tu bloques — je te guide étape par étape.",
     },
   ]);
   const [tutorInput, setTutorInput] = useState("");
   const [tutorLoading, setTutorLoading] = useState(false);
 
   const handleSubmit = async () => {
+    if (!activeExercise) return;
     setChecking(true);
     const results: Record<string, EvalResult> = {};
 
     await Promise.all(
-      instance.questions.map(async (q) => {
+      activeExercise.questions.map(async (q) => {
         const res = await fetch("/api/evaluate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             question_type: q.type,
+            question_prompt: q.prompt,
             student_answer: answers[q.id] || "",
             expected: q.expected,
             unit: q.unit,
@@ -82,7 +206,7 @@ function ExerciseRunnerContent() {
       const vals = Object.values(results);
       const sumScore = vals.reduce((a, r) => a + r.score, 0);
       const overallStatus =
-        sumScore >= instance.questions.length * 0.95
+        sumScore >= activeExercise.questions.length * 0.95
           ? "correct"
           : sumScore > 0
           ? "partially_correct"
@@ -98,13 +222,13 @@ function ExerciseRunnerContent() {
 
       await recordExerciseSubmission({
         studentId: user.id,
-        exerciseId: template.id,
-        exerciseTitle: template.title,
-        conceptCodes: template.conceptCodes,
-        renderedParams: instance.params,
+        exerciseId: activeExercise.id,
+        exerciseTitle: activeExercise.title,
+        conceptCodes: activeExercise.conceptCodes,
+        renderedParams: activeExercise.params,
         rawAnswers: answers,
         score: sumScore,
-        maxScore: instance.questions.length,
+        maxScore: Math.max(activeExercise.questions.length, 1),
         status: overallStatus,
         engine: vals[0]?.engine || "ts_fallback",
         errors,
@@ -123,7 +247,7 @@ function ExerciseRunnerContent() {
   };
 
   const sendTutorMessage = async () => {
-    if (!tutorInput.trim() || tutorLoading) return;
+    if (!activeExercise || !tutorInput.trim() || tutorLoading) return;
     const nextUserMsg = { role: "user" as const, content: tutorInput.trim() };
     const history = [...tutorMessages, nextUserMsg];
     setTutorMessages(history);
@@ -141,9 +265,9 @@ function ExerciseRunnerContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: user?.id,
-          chapterTitle: `${template.domain} — ${template.chapter}`,
-          lessonContext: template.lessonContent,
-          exerciseStatement: instance.statement,
+          chapterTitle: `${activeExercise.domain} — ${activeExercise.chapter}`,
+          lessonContext: activeExercise.lessonContent,
+          exerciseStatement: activeExercise.statement,
           studentError: detectedErrors || undefined,
           mode: "guide",
           messages: history,
@@ -171,6 +295,34 @@ function ExerciseRunnerContent() {
     router.push("/auth/login");
   };
 
+  if (loadingDb) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-500">
+        Chargement de l&apos;exercice depuis Supabase…
+      </div>
+    );
+  }
+
+  if (notFound || !activeExercise) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="bg-white rounded-3xl border border-slate-100 p-8 max-w-md w-full text-center shadow-sm">
+          <div className="text-4xl mb-3">🔎</div>
+          <h1 className="text-lg font-extrabold text-slate-900 mb-2">Exercice introuvable</h1>
+          <p className="text-sm text-slate-500 mb-6">
+            Cet exercice n&apos;existe pas ou n&apos;est plus disponible.
+          </p>
+          <Link
+            href="/exercises"
+            className="inline-block bg-indigo-600 text-white font-bold text-sm px-6 py-3 rounded-xl hover:bg-indigo-700"
+          >
+            ← Retour aux exercices
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   const initials = user ? (user.firstName?.[0] ?? "E") + (user.lastName?.[0] ?? "") : "EL";
   const totalScore = Object.values(feedback).reduce((acc, f) => acc + f.score, 0);
   const engineUsed = Object.values(feedback)[0]?.engine;
@@ -189,33 +341,34 @@ function ExerciseRunnerContent() {
   };
 
   const nextExerciseIdx =
-    (CURRICULUM_EXERCISES.findIndex((e) => e.id === template.id) + 1) %
+    (CURRICULUM_EXERCISES.findIndex((e) => e.id === activeExercise.id) + 1) %
     CURRICULUM_EXERCISES.length;
   const nextExercise = CURRICULUM_EXERCISES[nextExerciseIdx];
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Top Bar */}
       <header className="bg-white border-b border-slate-100 px-6 py-3 flex items-center gap-4 sticky top-0 z-20">
         <Link href="/exercises" className="text-slate-500 hover:text-slate-800 transition-colors text-sm font-medium">
           ← Tous les exercices
         </Link>
         <div className="hidden sm:flex items-center gap-2 text-xs text-slate-500">
           <span className="bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-lg">
-            {template.level}
+            {activeExercise.level}
           </span>
           <span>·</span>
-          <span>{template.domain}</span>
+          <span>{activeExercise.domain}</span>
           <span>·</span>
-          <span className="font-semibold text-slate-700">{template.chapter}</span>
+          <span className="font-semibold text-slate-700">{activeExercise.chapter}</span>
         </div>
         <div className="ml-auto flex items-center gap-2.5">
-          <button
-            onClick={() => setShowLesson(!showLesson)}
-            className="text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl transition-colors"
-          >
-            📖 {showLesson ? "Masquer cours" : "Cours"}
-          </button>
+          {activeExercise.lessonContent && (
+            <button
+              onClick={() => setShowLesson(!showLesson)}
+              className="text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl transition-colors"
+            >
+              📖 {showLesson ? "Masquer cours" : "Cours"}
+            </button>
+          )}
           <button
             onClick={() => setShowTutor(!showTutor)}
             className="text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl transition-colors"
@@ -233,17 +386,18 @@ function ExerciseRunnerContent() {
 
       <div className="max-w-6xl mx-auto p-6 lg:p-10 flex flex-col lg:flex-row gap-8">
         <div className="flex-1 min-w-0">
-          {/* Collapsible Lesson Sheet */}
-          {showLesson && (
+          {showLesson && activeExercise.lessonContent && (
             <div className="bg-indigo-50/70 border border-indigo-200 rounded-3xl p-6 mb-6 space-y-3 text-sm text-slate-700">
-              <div className="font-extrabold text-indigo-900">📖 Rappel : {template.lessonTitle}</div>
+              <div className="font-extrabold text-indigo-900">📖 Rappel : {activeExercise.lessonTitle}</div>
               <div className="leading-relaxed">
-                <MathText text={template.lessonContent} />
+                <MathText text={activeExercise.lessonContent} />
               </div>
-              <div className="bg-white rounded-2xl p-4 border border-indigo-100 text-xs">
-                <strong className="text-slate-900">Exemple résolu : </strong>
-                <MathText text={template.workedExample} />
-              </div>
+              {activeExercise.workedExample && (
+                <div className="bg-white rounded-2xl p-4 border border-indigo-100 text-xs">
+                  <strong className="text-slate-900">Exemple résolu : </strong>
+                  <MathText text={activeExercise.workedExample} />
+                </div>
+              )}
             </div>
           )}
 
@@ -251,30 +405,38 @@ function ExerciseRunnerContent() {
           <div className="bg-white rounded-3xl border border-slate-100 p-7 mb-6 shadow-sm">
             <div className="flex items-start justify-between gap-4 mb-5">
               <div>
-                <h1 className="text-xl font-extrabold text-slate-900 mb-1.5">{template.title}</h1>
+                <h1 className="text-xl font-extrabold text-slate-900 mb-1.5">{activeExercise.title}</h1>
                 <div className="flex gap-1.5 flex-wrap">
-                  {template.conceptCodes.map((c) => (
-                    <span key={c} className="text-[11px] font-mono bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
-                      {c}
+                  {activeExercise.conceptCodes.length > 0 ? (
+                    activeExercise.conceptCodes.map((c) => (
+                      <span key={c} className="text-[11px] font-mono bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">
+                        {c}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-[11px] font-bold bg-violet-50 text-violet-700 px-2.5 py-0.5 rounded-full">
+                      Exercice de ton professeur
                     </span>
-                  ))}
+                  )}
                 </div>
               </div>
-              <button
-                onClick={resetWithNewValues}
-                className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-2 rounded-xl whitespace-nowrap"
-              >
-                🎲 Nouvelles valeurs
-              </button>
+              {activeExercise.isRandomizable && (
+                <button
+                  onClick={resetWithNewValues}
+                  className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-2 rounded-xl whitespace-nowrap"
+                >
+                  🎲 Nouvelles valeurs
+                </button>
+              )}
             </div>
             <div className="bg-slate-50 rounded-2xl p-5 text-slate-800 leading-relaxed text-sm sm:text-base">
-              <MathText text={instance.statement} />
+              <MathText text={activeExercise.statement} />
             </div>
           </div>
 
           {/* Questions */}
           <div className="space-y-5">
-            {instance.questions.map((q) => {
+            {activeExercise.questions.map((q) => {
               const fb = feedback[q.id];
               return (
                 <div key={q.id} className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm">
@@ -282,30 +444,44 @@ function ExerciseRunnerContent() {
                     <MathText text={q.prompt} />
                   </div>
 
-                  <div className="flex gap-3">
-                    <input
-                      type="text"
-                      value={answers[q.id] || ""}
-                      onFocus={() => setActiveInputId(q.id)}
-                      onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
-                      placeholder={q.placeholder}
-                      disabled={submitted}
-                      className={`flex-1 border rounded-xl px-4 py-3 font-mono text-slate-900 placeholder:text-slate-400 bg-white text-sm outline-none focus:ring-2 focus:ring-indigo-300 ${
-                        fb ? `${feedbackBg[fb.status]} border` : "border-slate-200 focus:border-indigo-400"
-                      }`}
-                    />
+                  <div className="flex gap-3 items-start">
+                    {q.type === "free_text" ? (
+                      <textarea
+                        rows={3}
+                        value={answers[q.id] || ""}
+                        onFocus={() => setActiveInputId(q.id)}
+                        onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
+                        placeholder={q.placeholder}
+                        disabled={submitted}
+                        className={`flex-1 border rounded-xl px-4 py-3 text-slate-900 placeholder:text-slate-400 bg-white text-sm outline-none focus:ring-2 focus:ring-indigo-300 ${
+                          fb ? `${feedbackBg[fb.status]} border` : "border-slate-200 focus:border-indigo-400"
+                        }`}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={answers[q.id] || ""}
+                        onFocus={() => setActiveInputId(q.id)}
+                        onChange={(e) => setAnswers({ ...answers, [q.id]: e.target.value })}
+                        placeholder={q.placeholder}
+                        disabled={submitted}
+                        className={`flex-1 border rounded-xl px-4 py-3 font-mono text-slate-900 placeholder:text-slate-400 bg-white text-sm outline-none focus:ring-2 focus:ring-indigo-300 ${
+                          fb ? `${feedbackBg[fb.status]} border` : "border-slate-200 focus:border-indigo-400"
+                        }`}
+                      />
+                    )}
                     {!submitted && (
                       <button
                         type="button"
                         onClick={() => setRevealedHints((p) => ({ ...p, [q.id]: !p[q.id] }))}
-                        className="text-xs font-bold text-slate-500 hover:text-indigo-600 px-3 whitespace-nowrap"
+                        className="text-xs font-bold text-slate-500 hover:text-indigo-600 px-3 py-2 whitespace-nowrap"
                       >
                         💡 Indice
                       </button>
                     )}
                   </div>
 
-                  {!submitted && activeInputId === q.id && (
+                  {!submitted && q.type !== "free_text" && activeInputId === q.id && (
                     <MathKeypad
                       onInsert={(token) =>
                         setAnswers((prev) => ({ ...prev, [q.id]: (prev[q.id] || "") + token }))
@@ -359,7 +535,6 @@ function ExerciseRunnerContent() {
             })}
           </div>
 
-          {/* Actions */}
           <div className="mt-6 flex flex-col sm:flex-row gap-3">
             {!submitted ? (
               <button
@@ -375,13 +550,13 @@ function ExerciseRunnerContent() {
                   onClick={resetWithNewValues}
                   className="flex-1 bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 text-sm shadow-lg shadow-indigo-100"
                 >
-                  🎲 Refaire avec de nouvelles valeurs
+                  {activeExercise.isRandomizable ? "🎲 Refaire avec de nouvelles valeurs" : "🔄 Réessayer"}
                 </button>
                 <Link
                   href={`/exercises/${nextExercise.id}`}
                   className="flex-1 text-center bg-emerald-600 text-white font-bold py-3.5 rounded-2xl hover:bg-emerald-700 text-sm"
                 >
-                  Suivant : {nextExercise.title.slice(0, 26)}… →
+                  Autre exercice →
                 </Link>
               </>
             )}
@@ -390,19 +565,18 @@ function ExerciseRunnerContent() {
           {submitted && (
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 px-1">
               <span>
-                Note : <strong className="text-slate-900">{totalScore.toFixed(2)} / {instance.questions.length}</strong>
+                Note : <strong className="text-slate-900">{totalScore.toFixed(2)} / {activeExercise.questions.length}</strong>
                 {savedToDb && (
-                  <span className="ml-2 text-emerald-600 font-semibold">✓ Enregistré dans ta carte de maîtrise</span>
+                  <span className="ml-2 text-emerald-600 font-semibold">✓ Enregistré dans Supabase</span>
                 )}
               </span>
               <span className="bg-white border border-slate-200 px-2.5 py-1 rounded-full font-mono">
-                {engineUsed === "sympy_pint" ? "🐍 SymPy + Pint" : "⚡ Évaluateur SPC"}
+                {engineUsed === "sympy_pint" ? "🐍 SymPy + Pint" : engineUsed?.startsWith("ai_rubric") ? "🤖 Barème IA" : "⚡ Évaluateur SPC"}
               </span>
             </div>
           )}
         </div>
 
-        {/* Grounded AI Tutor Drawer */}
         {showTutor && (
           <aside className="lg:w-84 shrink-0">
             <div className="bg-white border border-slate-100 rounded-3xl shadow-sm flex flex-col h-[560px] sticky top-20">
@@ -412,7 +586,7 @@ function ExerciseRunnerContent() {
                 </div>
                 <div>
                   <div className="font-bold text-slate-900 text-sm">Tuteur IA (Guidé)</div>
-                  <div className="text-[11px] text-emerald-600 font-medium">● Basé sur la fiche du chapitre</div>
+                  <div className="text-[11px] text-emerald-600 font-medium">● Contexte de cet exercice</div>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">

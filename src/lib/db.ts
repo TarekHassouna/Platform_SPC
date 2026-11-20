@@ -49,6 +49,24 @@ export interface ClassAssignmentRow {
   className: string;
   mode: string;
   dueAt: string | null;
+  targetExerciseId?: string;
+}
+
+export interface DatabaseExerciseRecord {
+  id: string;
+  versionId: string;
+  title: string;
+  level: string;
+  domain: string;
+  chapter: string;
+  difficulty: string;
+  statement: string;
+  questions: {
+    prompt: string;
+    type: string;
+    expected: string;
+    misconception?: string;
+  }[];
 }
 
 export interface ConceptRow {
@@ -246,19 +264,46 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
   let assignments: ClassAssignmentRow[] = [];
   if (enrolledClasses.length > 0) {
     const classIds = enrolledClasses.map((c) => c.id);
-    const { data: asgRows } = await supabase
-      .from("assignments")
-      .select("id, title, class_id, mode, due_at")
-      .in("class_id", classIds)
-      .order("created_at", { ascending: false });
+    const [{ data: asgRows }, { data: allVersions }] = await Promise.all([
+      supabase
+        .from("assignments")
+        .select("id, title, class_id, mode, due_at, exercise_version_ids")
+        .in("class_id", classIds)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("exercise_versions")
+        .select("id, exercise_id, title")
+        .order("created_at", { ascending: false }),
+    ]);
 
-    assignments = (asgRows || []).map((a: Record<string, unknown>) => ({
-      id: String(a.id),
-      title: String(a.title),
-      className: enrolledClasses.find((c) => c.id === a.class_id)?.name || "Classe",
-      mode: a.mode === "graded" ? "Noté" : "Entraînement",
-      dueAt: a.due_at ? String(a.due_at) : null,
-    }));
+    assignments = (asgRows || []).map((a: Record<string, unknown>) => {
+      const versionIds = Array.isArray(a.exercise_version_ids)
+        ? (a.exercise_version_ids as string[])
+        : [];
+      let targetExerciseId: string | undefined = versionIds[0];
+
+      // If assignment didn't store exercise_version_ids (or was matched by title), resolve by title
+      if (!targetExerciseId && allVersions && allVersions.length > 0) {
+        const cleanTitle = String(a.title || "")
+          .replace(/^Devoir\s*[—–-]\s*/i, "")
+          .trim()
+          .toLowerCase();
+        const found = allVersions.find((v: Record<string, unknown>) => {
+          const vt = String(v.title || "").trim().toLowerCase();
+          return vt === cleanTitle || cleanTitle.includes(vt) || vt.includes(cleanTitle);
+        });
+        if (found) targetExerciseId = String(found.id);
+      }
+
+      return {
+        id: String(a.id),
+        title: String(a.title),
+        className: enrolledClasses.find((c) => c.id === a.class_id)?.name || "Classe",
+        mode: a.mode === "graded" ? "Noté" : "Entraînement",
+        dueAt: a.due_at ? String(a.due_at) : null,
+        targetExerciseId,
+      };
+    });
   }
 
   const mastery: MasteryRow[] = (masteryRows || []).map((m: Record<string, unknown>) => {
@@ -546,4 +591,65 @@ export async function recordPhotoSubmission(params: {
       feedback_summary: "Copie manuscrite transcrite et confirmée",
     });
   }
+}
+
+/**
+ * Fetches a teacher-created / AI-generated exercise from Supabase by exercise_versions.id OR exercises.id
+ */
+export async function fetchDatabaseExercise(
+  idOrVersionId: string
+): Promise<DatabaseExerciseRecord | null> {
+  const supabase = getSupabaseBrowserClient();
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    idOrVersionId
+  );
+  if (!isSupabaseConfigured || !supabase || !isUuid) return null;
+
+  // Try matching exercise_versions.id first, then exercise_versions.exercise_id
+  let { data: version } = await supabase
+    .from("exercise_versions")
+    .select(
+      "id, exercise_id, title, statement_template, questions_schema, exercises(level, domain, chapter, difficulty)"
+    )
+    .eq("id", idOrVersionId)
+    .maybeSingle();
+
+  if (!version) {
+    const res = await supabase
+      .from("exercise_versions")
+      .select(
+        "id, exercise_id, title, statement_template, questions_schema, exercises(level, domain, chapter, difficulty)"
+      )
+      .eq("exercise_id", idOrVersionId)
+      .order("version_number", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    version = res.data;
+  }
+
+  if (!version) return null;
+
+  const exMeta = (Array.isArray(version.exercises)
+    ? version.exercises[0]
+    : version.exercises) as Record<string, string> | null;
+
+  const diffMap: Record<string, string> = {
+    guided: "Guidé",
+    standard: "Standard",
+    bac: "Type Bac",
+  };
+
+  return {
+    id: String(version.exercise_id),
+    versionId: String(version.id),
+    title: String(version.title || "Exercice de classe"),
+    level: exMeta?.level || "Terminale",
+    domain: exMeta?.domain || "Physique-Chimie",
+    chapter: exMeta?.chapter || "Devoir de classe",
+    difficulty: diffMap[exMeta?.difficulty || "standard"] || "Standard",
+    statement: String(version.statement_template || ""),
+    questions: Array.isArray(version.questions_schema)
+      ? (version.questions_schema as DatabaseExerciseRecord["questions"])
+      : [],
+  };
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { callTextAI } from "@/lib/ai-provider";
 
 interface MisconceptionRule {
   expr: string;
@@ -7,7 +8,8 @@ interface MisconceptionRule {
 }
 
 interface EvaluatePayload {
-  question_type: "expression" | "quantity";
+  question_type: "expression" | "quantity" | "free_text";
+  question_prompt?: string;
   student_answer: string;
   expected: string;
   unit?: string;
@@ -330,6 +332,62 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON payload" }, { status: 400 });
+  }
+
+  // Open-ended / justification questions: evaluate via AI rubric (Vision Doc §7.1)
+  if (body.question_type === "free_text") {
+    if (!body.student_answer?.trim()) {
+      return NextResponse.json({
+        status: "unreadable",
+        score: 0,
+        max_score: 1,
+        explanation: "Ta réponse est vide. Rédige une courte justification ou explication.",
+        expected_display: body.expected,
+        engine: "ai_rubric",
+      });
+    }
+
+    const aiRes = await callTextAI({
+      system:
+        "Tu es un correcteur de Physique-Chimie au lycée français. Évalue la réponse rédigée par l'élève par rapport au corrigé attendu. " +
+        'Retourne UNIQUEMENT un JSON valide : {"status":"correct"|"partially_correct"|"incorrect","score":0.0..1.0,"error_category":null|"Conceptuel"|"Méthodologie"|"Communication","explanation":"explication pédagogique courte en français"}',
+      messages: [
+        {
+          role: "user",
+          content: `Question : ${body.question_prompt || ""}\nAttendu / barème : ${body.expected}\nRéponse de l'élève : ${body.student_answer}`,
+        },
+      ],
+      maxTokens: 300,
+    });
+
+    if (aiRes?.text) {
+      const m = aiRes.text.match(/\{[\s\S]*\}/);
+      if (m) {
+        try {
+          const parsed = JSON.parse(m[0]);
+          return NextResponse.json({
+            status: parsed.status || "partially_correct",
+            score: Math.min(1, Math.max(0, Number(parsed.score ?? 0.5))),
+            max_score: 1,
+            error_category: parsed.error_category || undefined,
+            explanation: parsed.explanation || "Réponse évaluée par rapport au barème.",
+            expected_display: body.expected,
+            engine: `ai_rubric_${aiRes.provider}`,
+          });
+        } catch {
+          // fallback below
+        }
+      }
+    }
+
+    return NextResponse.json({
+      status: "partially_correct",
+      score: 0.5,
+      max_score: 1,
+      explanation: "Réponse enregistrée. Compare tes arguments avec les points clés attendus ci-dessous.",
+      expected_display: body.expected,
+      engine: "ai_rubric_fallback",
+    });
   }
 
   const serviceUrl = process.env.EVALUATION_SERVICE_URL || "http://127.0.0.1:8000";

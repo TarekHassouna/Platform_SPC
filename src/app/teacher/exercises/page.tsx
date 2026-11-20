@@ -200,7 +200,7 @@ export default function TeacherExercisesPage() {
                     📤 Assigner à une classe
                   </button>
                   <Link
-                    href="/exercises"
+                    href={`/exercises/${ex.versionId || ex.id}`}
                     className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     Aperçu élève

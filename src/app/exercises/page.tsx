@@ -96,7 +96,7 @@ export default function ExerciseCatalogPage() {
               {assignments.map((a) => (
                 <Link
                   key={a.id}
-                  href="/exercises/ohm-001"
+                  href={a.targetExerciseId ? `/exercises/${a.targetExerciseId}` : "/exercises"}
                   className="bg-white rounded-2xl p-4 border border-indigo-100 hover:border-indigo-300 flex items-center justify-between gap-3 transition-all"
                 >
                   <div>

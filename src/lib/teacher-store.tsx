@@ -39,6 +39,7 @@ export interface TeacherClass {
 
 export interface ExerciseItem {
   id: string;
+  versionId?: string;
   title: string;
   level: Level;
   domain: string;
@@ -408,7 +409,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
       const { data: dbExRows } = await supabase
         .from("exercises")
         .select(
-          "id, level, domain, chapter, difficulty, source, status, exercise_versions(version_number, title, statement_template, questions_schema)"
+          "id, level, domain, chapter, difficulty, source, status, exercise_versions(id, version_number, title, statement_template, questions_schema)"
         )
         .eq("author_id", user.id)
         .order("created_at", { ascending: false });
@@ -428,6 +429,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         };
         return {
           id: String(e.id),
+          versionId: latest.id ? String(latest.id) : undefined,
           title: String(latest.title || "Exercice personnalisé"),
           level: (e.level as Level) || "Terminale",
           domain: String(e.domain || "Physique-Chimie"),
@@ -557,16 +559,25 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         .select("id")
         .single();
 
+      let versionId: string | undefined;
       if (data?.id) {
         newId = data.id;
-        await supabase.from("exercise_versions").insert({
-          exercise_id: data.id,
-          version_number: 1,
-          title: ex.title,
-          statement_template: ex.statement,
-          questions_schema: ex.questions,
-        });
+        const { data: verRow } = await supabase
+          .from("exercise_versions")
+          .insert({
+            exercise_id: data.id,
+            version_number: 1,
+            title: ex.title,
+            statement_template: ex.statement,
+            questions_schema: ex.questions,
+          })
+          .select("id")
+          .single();
+        if (verRow?.id) versionId = String(verRow.id);
       }
+      const created: ExerciseItem = { ...ex, id: newId, versionId };
+      setExercises((prev) => [created, ...prev]);
+      return created;
     }
 
     const created: ExerciseItem = { ...ex, id: newId };
@@ -581,6 +592,15 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     const cls = classes.find((c) => c.id === asg.classId);
     let newId = `asg-${Date.now()}`;
 
+    // Resolve UUID exercise_version_ids for any custom/AI exercises being assigned
+    const versionIds: string[] = [];
+    for (const exId of asg.exerciseIds || []) {
+      const found = exercises.find((e) => e.id === exId);
+      if (found?.versionId) {
+        versionIds.push(found.versionId);
+      }
+    }
+
     if (isSupabaseConfigured && supabase && user?.id) {
       const { data } = await supabase
         .from("assignments")
@@ -588,6 +608,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           class_id: asg.classId,
           teacher_id: user.id,
           title: asg.title,
+          exercise_version_ids: versionIds,
           mode: asg.mode === "Noté" ? "graded" : "practice",
         })
         .select("id")
