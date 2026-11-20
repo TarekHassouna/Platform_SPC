@@ -154,8 +154,11 @@ export async function callVisionAI(params: {
   prompt: string;
   imageBase64: string;
   mimeType: string;
+  maxTokens?: number;
+  jsonMode?: boolean;
 }): Promise<{ text: string; provider: "claude" | "gemini" } | null> {
   const provider = getActiveAIProvider();
+  const maxTokens = params.maxTokens ?? 1200;
 
   if (provider === "claude") {
     const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
@@ -167,7 +170,7 @@ export async function callVisionAI(params: {
       },
       body: JSON.stringify({
         model: process.env.CLAUDE_VISION_MODEL || "claude-3-5-sonnet-latest",
-        max_tokens: 900,
+        max_tokens: maxTokens,
         system: params.system,
         messages: [
           {
@@ -200,43 +203,60 @@ export async function callVisionAI(params: {
       new Set([
         process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
         "gemini-3.1-flash-lite",
-        "gemini-3.8-flash",
       ])
     );
 
+    const generationConfig: Record<string, unknown> = {
+      maxOutputTokens: maxTokens,
+      temperature: 0.2,
+    };
+    if (params.jsonMode) {
+      generationConfig.responseMimeType = "application/json";
+    }
+
     for (const model of models) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-          apiKey
-        )}`;
-        const res = await fetchWithTimeout(
-          url,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: params.system }] },
-              contents: [
-                {
-                  role: "user",
-                  parts: [
-                    { inlineData: { mimeType: params.mimeType, data: params.imageBase64 } },
-                    { text: params.prompt },
-                  ],
-                },
-              ],
-              generationConfig: { maxOutputTokens: 900, temperature: 0.2 },
-            }),
-          },
-          12000
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) return { text, provider: "gemini" };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
+            apiKey
+          )}`;
+          const res = await fetchWithTimeout(
+            url,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                systemInstruction: { parts: [{ text: params.system }] },
+                contents: [
+                  {
+                    role: "user",
+                    parts: [
+                      { inlineData: { mimeType: params.mimeType, data: params.imageBase64 } },
+                      { text: params.prompt },
+                    ],
+                  },
+                ],
+                generationConfig,
+              }),
+            },
+            18000
+          );
+          if (res.ok) {
+            const data = await res.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) return { text, provider: "gemini" };
+          } else if (res.status === 429 || res.status === 503) {
+            await new Promise((r) => setTimeout(r, 450 * (attempt + 1)));
+            continue;
+          } else {
+            break;
+          }
+        } catch {
+          if (attempt === 0) {
+            await new Promise((r) => setTimeout(r, 300));
+            continue;
+          }
         }
-      } catch {
-        continue;
       }
     }
   }

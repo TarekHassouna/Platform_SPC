@@ -61,6 +61,10 @@ export interface ExerciseItem {
   status: "published" | "draft";
   version: string;
   skills: string[];
+  lessonTitle?: string;
+  lessonContent?: string;
+  workedExample?: string;
+  showInStudentBank?: boolean;
   statement: string;
   questions: { prompt: string; type: string; expected: string; hint?: string; misconception?: string }[];
 }
@@ -111,6 +115,7 @@ interface TeacherStoreContextType {
   resolveAlert: (classId: string, alertId: string) => void;
   exercises: ExerciseItem[];
   addExercise: (ex: Omit<ExerciseItem, "id">) => Promise<ExerciseItem>;
+  toggleExerciseStudentBank: (exerciseId: string) => Promise<void>;
   assignments: AssignmentItem[];
   addAssignment: (asg: Omit<AssignmentItem, "id" | "completedCount" | "totalStudents">) => Promise<void>;
   toggleAssignmentRetry: (assignmentId: string) => Promise<void>;
@@ -517,7 +522,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
       const { data: dbExRows } = await supabase
         .from("exercises")
         .select(
-          "id, level, domain, chapter, difficulty, source, status, exercise_versions(id, version_number, title, statement_template, questions_schema)"
+          "id, level, domain, chapter, difficulty, source, status, exercise_versions(id, version_number, title, statement_template, questions_schema, rubric_schema)"
         )
         .eq("author_id", user.id)
         .order("created_at", { ascending: false });
@@ -525,6 +530,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
       const customExercises: ExerciseItem[] = (dbExRows || []).map((e: Record<string, unknown>) => {
         const versions = (e.exercise_versions as Array<Record<string, unknown>>) || [];
         const latest = versions[versions.length - 1] || {};
+        const rubric = (latest.rubric_schema as Record<string, unknown>) || {};
         const diffMap: Record<string, ExerciseItem["difficulty"]> = {
           guided: "Guidé",
           standard: "Standard",
@@ -546,7 +552,11 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           source: srcMap[String(e.source)] || "Créé par moi",
           status: e.status === "published" ? "published" : "draft",
           version: `v${latest.version_number || 1}.0`,
-          skills: [],
+          skills: Array.isArray(rubric.skills) ? (rubric.skills as string[]) : [],
+          lessonTitle: rubric.lessonTitle ? String(rubric.lessonTitle) : undefined,
+          lessonContent: rubric.lessonContent ? String(rubric.lessonContent) : undefined,
+          workedExample: rubric.workedExample ? String(rubric.workedExample) : undefined,
+          showInStudentBank: rubric.showInStudentBank === true,
           statement: String(latest.statement_template || ""),
           questions: Array.isArray(latest.questions_schema)
             ? (latest.questions_schema as ExerciseItem["questions"])
@@ -679,6 +689,13 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
             title: ex.title,
             statement_template: ex.statement,
             questions_schema: ex.questions,
+            rubric_schema: {
+              showInStudentBank: ex.showInStudentBank ?? true,
+              lessonTitle: ex.lessonTitle || "",
+              lessonContent: ex.lessonContent || "",
+              workedExample: ex.workedExample || "",
+              skills: ex.skills || [],
+            },
           })
           .select("id")
           .single();
@@ -835,6 +852,30 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const toggleExerciseStudentBank = async (exerciseId: string) => {
+    const target = exercises.find((e) => e.id === exerciseId);
+    if (!target || !target.versionId) return;
+    const nextVal = !target.showInStudentBank;
+    setExercises((prev) =>
+      prev.map((e) => (e.id === exerciseId ? { ...e, showInStudentBank: nextVal } : e))
+    );
+    const supabase = getSupabaseBrowserClient();
+    if (isSupabaseConfigured && supabase && user?.id) {
+      await supabase
+        .from("exercise_versions")
+        .update({
+          rubric_schema: {
+            showInStudentBank: nextVal,
+            lessonTitle: target.lessonTitle || "",
+            lessonContent: target.lessonContent || "",
+            workedExample: target.workedExample || "",
+            skills: target.skills || [],
+          },
+        })
+        .eq("id", target.versionId);
+    }
+  };
+
   const updateCopy = (copyId: string, updates: Partial<CopySubmission>) => {
     setCopies((prev) => prev.map((c) => (c.id === copyId ? { ...c, ...updates } : c)));
   };
@@ -852,6 +893,7 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
         resolveAlert,
         exercises,
         addExercise,
+        toggleExerciseStudentBank,
         assignments,
         addAssignment,
         toggleAssignmentRetry,

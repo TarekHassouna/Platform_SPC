@@ -53,6 +53,10 @@ export interface ClassAssignmentRow {
   timeLimitMinutes: number | null;
   dueAt: string | null;
   targetExerciseId?: string;
+  completed: boolean;
+  bestScore?: number;
+  maxScore?: number;
+  lastSubmittedAt?: string;
 }
 
 export interface DatabaseExerciseRecord {
@@ -63,6 +67,11 @@ export interface DatabaseExerciseRecord {
   domain: string;
   chapter: string;
   difficulty: string;
+  skills?: string[];
+  lessonTitle?: string;
+  lessonContent?: string;
+  workedExample?: string;
+  showInStudentBank?: boolean;
   statement: string;
   questions: {
     prompt: string;
@@ -250,12 +259,35 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
       .eq("student_id", studentId),
     supabase
       .from("submissions")
-      .select("id, rendered_params, created_at, evaluation_results(score, max_score, status, feedback_summary)")
+      .select("id, assignment_id, rendered_params, created_at, evaluation_results(score, max_score, status, feedback_summary)")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false })
-      .limit(10),
+      .limit(60),
     supabase.from("concepts").select("code, label, domain, level"),
   ]);
+
+  // Index completed submissions by assignment_id so student sees "À faire" vs "Déjà faits"
+  const subByAssignment = new Map<
+    string,
+    { bestScore: number; maxScore: number; lastSubmittedAt: string }
+  >();
+  (subRows || []).forEach((s: Record<string, unknown>) => {
+    const asgId = s.assignment_id ? String(s.assignment_id) : null;
+    if (!asgId) return;
+    const ev = (Array.isArray(s.evaluation_results)
+      ? s.evaluation_results[0]
+      : s.evaluation_results) as Record<string, unknown> | null;
+    const score = Number(ev?.score ?? 0);
+    const maxScore = Number(ev?.max_score ?? 1);
+    const existing = subByAssignment.get(asgId);
+    if (!existing || score > existing.bestScore) {
+      subByAssignment.set(asgId, {
+        bestScore: score,
+        maxScore,
+        lastSubmittedAt: existing?.lastSubmittedAt || String(s.created_at),
+      });
+    }
+  });
 
   const enrolledClasses: EnrolledClassRow[] = (memberRows || [])
     .map((r: Record<string, unknown>) => {
@@ -309,6 +341,8 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
           ? a.time_limit_minutes
           : null;
 
+      const doneInfo = subByAssignment.get(String(a.id));
+
       return {
         id: String(a.id),
         title: String(a.title),
@@ -319,6 +353,10 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
         timeLimitMinutes,
         dueAt: a.due_at ? String(a.due_at) : null,
         targetExerciseId,
+        completed: Boolean(doneInfo),
+        bestScore: doneInfo?.bestScore,
+        maxScore: doneInfo?.maxScore,
+        lastSubmittedAt: doneInfo?.lastSubmittedAt,
       };
     });
   }
@@ -631,7 +669,7 @@ export async function fetchDatabaseExercise(
   let { data: version } = await supabase
     .from("exercise_versions")
     .select(
-      "id, exercise_id, title, statement_template, questions_schema, exercises(level, domain, chapter, difficulty)"
+      "id, exercise_id, title, statement_template, questions_schema, rubric_schema, exercises(level, domain, chapter, difficulty)"
     )
     .eq("id", idOrVersionId)
     .maybeSingle();
@@ -640,7 +678,7 @@ export async function fetchDatabaseExercise(
     const res = await supabase
       .from("exercise_versions")
       .select(
-        "id, exercise_id, title, statement_template, questions_schema, exercises(level, domain, chapter, difficulty)"
+        "id, exercise_id, title, statement_template, questions_schema, rubric_schema, exercises(level, domain, chapter, difficulty)"
       )
       .eq("exercise_id", idOrVersionId)
       .order("version_number", { ascending: false })
@@ -654,6 +692,7 @@ export async function fetchDatabaseExercise(
   const exMeta = (Array.isArray(version.exercises)
     ? version.exercises[0]
     : version.exercises) as Record<string, string> | null;
+  const rubric = (version.rubric_schema as Record<string, unknown>) || {};
 
   const diffMap: Record<string, string> = {
     guided: "Guidé",
@@ -669,11 +708,76 @@ export async function fetchDatabaseExercise(
     domain: exMeta?.domain || "Physique-Chimie",
     chapter: exMeta?.chapter || "Devoir de classe",
     difficulty: diffMap[exMeta?.difficulty || "standard"] || "Standard",
+    skills: Array.isArray(rubric.skills) ? (rubric.skills as string[]) : [],
+    lessonTitle: rubric.lessonTitle ? String(rubric.lessonTitle) : undefined,
+    lessonContent: rubric.lessonContent ? String(rubric.lessonContent) : undefined,
+    workedExample: rubric.workedExample ? String(rubric.workedExample) : undefined,
+    showInStudentBank: rubric.showInStudentBank === true,
     statement: String(version.statement_template || ""),
     questions: Array.isArray(version.questions_schema)
       ? (version.questions_schema as DatabaseExerciseRecord["questions"])
       : [],
   };
+}
+
+/**
+ * Fetches all teacher-published exercises marked showInStudentBank = true
+ * so they appear in the bottom practice bank alongside the official exercises.
+ */
+export async function fetchStudentBankExercises(): Promise<DatabaseExerciseRecord[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) return [];
+
+  const { data } = await supabase
+    .from("exercise_versions")
+    .select(
+      "id, exercise_id, title, statement_template, questions_schema, rubric_schema, exercises!inner(level, domain, chapter, difficulty, status)"
+    )
+    .eq("exercises.status", "published")
+    .order("created_at", { ascending: false });
+
+  const diffMap: Record<string, string> = {
+    guided: "Guidé",
+    standard: "Standard",
+    bac: "Type Bac",
+  };
+
+  const results: DatabaseExerciseRecord[] = [];
+  const seenExerciseIds = new Set<string>();
+
+  (data || []).forEach((v: Record<string, unknown>) => {
+    const exId = String(v.exercise_id);
+    if (seenExerciseIds.has(exId)) return;
+    const rubric = (v.rubric_schema as Record<string, unknown>) || {};
+    if (rubric.showInStudentBank !== true) return;
+    seenExerciseIds.add(exId);
+
+    const exMeta = (Array.isArray(v.exercises) ? v.exercises[0] : v.exercises) as Record<
+      string,
+      string
+    > | null;
+
+    results.push({
+      id: exId,
+      versionId: String(v.id),
+      title: String(v.title || "Exercice du professeur"),
+      level: exMeta?.level || "Terminale",
+      domain: exMeta?.domain || "Physique-Chimie",
+      chapter: exMeta?.chapter || "Chapitre",
+      difficulty: diffMap[exMeta?.difficulty || "standard"] || "Standard",
+      skills: Array.isArray(rubric.skills) ? (rubric.skills as string[]) : [],
+      lessonTitle: rubric.lessonTitle ? String(rubric.lessonTitle) : undefined,
+      lessonContent: rubric.lessonContent ? String(rubric.lessonContent) : undefined,
+      workedExample: rubric.workedExample ? String(rubric.workedExample) : undefined,
+      showInStudentBank: true,
+      statement: String(v.statement_template || ""),
+      questions: Array.isArray(v.questions_schema)
+        ? (v.questions_schema as DatabaseExerciseRecord["questions"])
+        : [],
+    });
+  });
+
+  return results;
 }
 
 /**

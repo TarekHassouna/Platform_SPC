@@ -40,11 +40,12 @@ export async function POST(req: NextRequest) {
   const targetCount = detectRequestedCount(payload.prompt || "", payload.questionCount);
 
   const system =
-    "Tu es un professeur agrégé de Physique-Chimie qui conçoit des modèles d'exercices et quiz paramétrés pour le lycée français. " +
+    "Tu es un professeur agrégé de Physique-Chimie qui conçoit des modèles d'exercices, quiz et fiches de cours pour le lycée français. " +
     `RÈGLE ABSOLUE : le tableau 'questions' DOIT contenir EXACTEMENT ${targetCount} questions progressives (ni plus, ni moins — ne t'arrête JAMAIS à 3 si ${targetCount} est demandé). ` +
+    "Rédige aussi une fiche de cours concise ('lessonTitle', 'lessonContent' avec formules KaTeX entre $...$, et 'workedExample' avec un exemple résolu court). " +
     "Pour chaque question, rédige aussi un vrai 'hint' (indice pédagogique de 1 à 2 phrases qui guide l'élève sur la méthode ou la loi à utiliser SANS donner la réponse finale). " +
     "Retourne UNIQUEMENT un JSON valide avec cette structure exacte : " +
-    '{"title":"...","domain":"Électricité|Mécanique|Chimie|Métrologie","chapter":"...","skills":["..."],"statement":"...avec {param}...","params":[{"name":"...","range":"...","unit":"..."}],"questions":[{"prompt":"...","type":"Expression|Grandeur|Texte libre","expected":"...","hint":"...","misconception":"..."}],"verificationChecks":["..."]}';
+    '{"title":"...","domain":"Électricité|Mécanique|Chimie|Métrologie","chapter":"...","skills":["..."],"lessonTitle":"...","lessonContent":"...","workedExample":"...","statement":"...avec {param}...","params":[{"name":"...","range":"...","unit":"..."}],"questions":[{"prompt":"...","type":"Expression|Grandeur|Texte libre","expected":"...","hint":"...","misconception":"..."}],"verificationChecks":["..."]}';
 
   try {
     const aiRes = await callTextAI({
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
           content: `Niveau : ${payload.level}. Style : ${payload.difficulty}. Nombre EXACT de questions exigé : ${targetCount}. Demande enseignant : ${payload.prompt}`,
         },
       ],
-      maxTokens: Math.max(2200, targetCount * 420),
+      maxTokens: Math.max(2800, targetCount * 450),
       jsonMode: true,
     });
 

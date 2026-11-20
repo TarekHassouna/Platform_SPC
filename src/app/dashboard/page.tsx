@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const [classCodeInput, setClassCodeInput] = useState("");
   const [joinMessage, setJoinMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [joining, setJoining] = useState(false);
+  const [hwTab, setHwTab] = useState<"todo" | "done">("todo");
 
   useEffect(() => {
     if (user && user.role !== "student") {
@@ -254,55 +255,113 @@ export default function DashboardPage() {
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Left: Class assignments + Recommended exercises */}
           <div className="lg:col-span-2 space-y-6">
-            {data.assignments.length > 0 && (
-              <div>
-                <h2 className="text-lg font-bold text-slate-900 mb-3">📌 Devoirs de ta classe</h2>
-                <div className="space-y-3">
-                  {data.assignments.map((asg) => (
-                    <div
-                      key={asg.id}
-                      className="bg-indigo-50/70 border border-indigo-200 rounded-2xl p-5 flex items-center justify-between gap-4"
-                    >
-                      <div>
-                        <div className="text-xs font-bold text-indigo-700 mb-1 flex items-center gap-2 flex-wrap">
-                          <span>{asg.className} · {asg.mode}</span>
-                          <span
-                            className={`text-[10px] px-2 py-0.5 rounded-full ${
-                              asg.allowRetry
-                                ? "bg-emerald-100 text-emerald-700"
-                                : "bg-amber-100 text-amber-800"
+            {data.assignments.length > 0 && (() => {
+              const todoList = data.assignments.filter((a) => !a.completed);
+              const doneList = data.assignments.filter((a) => a.completed);
+              const shown = hwTab === "todo" ? todoList : doneList;
+              return (
+                <div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <h2 className="text-lg font-bold text-slate-900">📌 Devoirs de ta classe</h2>
+                    <div className="inline-flex bg-white p-1 rounded-xl border border-slate-200">
+                      <button
+                        type="button"
+                        onClick={() => setHwTab("todo")}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                          hwTab === "todo"
+                            ? "bg-indigo-600 text-white"
+                            : "text-slate-600 hover:text-indigo-700"
+                        }`}
+                      >
+                        ⏳ À faire ({todoList.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHwTab("done")}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                          hwTab === "done"
+                            ? "bg-emerald-600 text-white"
+                            : "text-slate-600 hover:text-emerald-700"
+                        }`}
+                      >
+                        ✅ Déjà faits ({doneList.length})
+                      </button>
+                    </div>
+                  </div>
+                  {shown.length === 0 ? (
+                    <div className="bg-white border border-slate-100 rounded-2xl p-5 text-center text-xs font-semibold text-slate-500">
+                      {hwTab === "todo"
+                        ? "🎉 Bravo ! Tu es à jour sur tous tes devoirs."
+                        : "Aucun devoir encore soumis."}
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                      {shown.map((asg) => {
+                        const pct =
+                          asg.bestScore !== undefined && asg.maxScore
+                            ? Math.round((asg.bestScore / asg.maxScore) * 100)
+                            : null;
+                        return (
+                          <div
+                            key={asg.id}
+                            className={`rounded-2xl p-4 border flex items-center justify-between gap-4 ${
+                              asg.completed
+                                ? "bg-emerald-50/60 border-emerald-200"
+                                : "bg-indigo-50/70 border-indigo-200"
                             }`}
                           >
-                            {asg.allowRetry ? "🔄 Réessais autorisés" : "🔒 1 seul essai"}
-                          </span>
-                          {!asg.allowHints && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
-                              🚫 Sans indices
-                            </span>
-                          )}
-                          {asg.timeLimitMinutes && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
-                              ⏱️ {asg.timeLimitMinutes} min
-                            </span>
-                          )}
-                        </div>
-                        <div className="font-bold text-slate-900">{asg.title}</div>
-                      </div>
-                      <Link
-                        href={
-                          asg.targetExerciseId
-                            ? `/exercises/${asg.targetExerciseId}?assignmentId=${asg.id}`
-                            : "/exercises"
-                        }
-                        className="bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700 whitespace-nowrap"
-                      >
-                        Ouvrir →
-                      </Link>
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-indigo-700 mb-1 flex items-center gap-1.5 flex-wrap">
+                                <span>{asg.className} · {asg.mode}</span>
+                                {asg.completed && pct !== null && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                    ✅ {asg.bestScore?.toFixed(1)}/{asg.maxScore} ({pct}%)
+                                  </span>
+                                )}
+                                <span
+                                  className={`text-[10px] px-2 py-0.5 rounded-full ${
+                                    asg.allowRetry
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : "bg-amber-100 text-amber-800"
+                                  }`}
+                                >
+                                  {asg.allowRetry ? "🔄 Réessais" : "🔒 1 essai"}
+                                </span>
+                                {!asg.allowHints && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700">
+                                    🚫 Sans indices
+                                  </span>
+                                )}
+                                {asg.timeLimitMinutes && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">
+                                    ⏱️ {asg.timeLimitMinutes} min
+                                  </span>
+                                )}
+                              </div>
+                              <div className="font-bold text-slate-900 truncate">{asg.title}</div>
+                            </div>
+                            <Link
+                              href={
+                                asg.targetExerciseId
+                                  ? `/exercises/${asg.targetExerciseId}?assignmentId=${asg.id}`
+                                  : "/exercises"
+                              }
+                              className={`text-white text-xs font-bold px-4 py-2 rounded-xl whitespace-nowrap ${
+                                asg.completed
+                                  ? "bg-emerald-600 hover:bg-emerald-700"
+                                  : "bg-indigo-600 hover:bg-indigo-700"
+                              }`}
+                            >
+                              {asg.completed ? (asg.allowRetry ? "Refaire →" : "Voir →") : "Ouvrir →"}
+                            </Link>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div>
               <h2 className="text-lg font-bold text-slate-900 mb-3">

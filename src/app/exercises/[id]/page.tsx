@@ -143,6 +143,9 @@ function ExerciseRunnerContent() {
         domain: dbExercise.domain,
         chapter: dbExercise.chapter,
         conceptCodes: [],
+        lessonTitle: dbExercise.lessonTitle,
+        lessonContent: dbExercise.lessonContent,
+        workedExample: dbExercise.workedExample,
         statement: dbExercise.statement,
         params: { versionId: dbExercise.versionId },
         questions: dbExercise.questions.map((q, idx) => {

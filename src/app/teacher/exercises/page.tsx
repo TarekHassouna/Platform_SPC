@@ -9,6 +9,7 @@ export default function TeacherExercisesPage() {
     classes,
     selectedClassId,
     exercises,
+    toggleExerciseStudentBank,
     assignments,
     addAssignment,
     toggleAssignmentRetry,
@@ -209,6 +210,25 @@ export default function TeacherExercisesPage() {
                     <span className="text-[11px] font-medium bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full">
                       {ex.questions.length} question(s)
                     </span>
+                    {ex.lessonContent && (
+                      <span className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full">
+                        📖 Fiche de cours
+                      </span>
+                    )}
+                    {ex.versionId && (
+                      <button
+                        type="button"
+                        onClick={() => toggleExerciseStudentBank(ex.id)}
+                        title="Cliquer pour afficher ou retirer cet exercice de la banque libre des élèves"
+                        className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full transition-colors cursor-pointer ${
+                          ex.showInStudentBank
+                            ? "bg-emerald-100 text-emerald-800 hover:bg-slate-200 hover:text-slate-700"
+                            : "bg-slate-100 text-slate-600 hover:bg-emerald-100 hover:text-emerald-800"
+                        }`}
+                      >
+                        {ex.showInStudentBank ? "📚 Visible banque élèves" : "🔒 Privé (cliquer pour ajouter banque)"}
+                      </button>
+                    )}
                   </div>
                 </div>
 

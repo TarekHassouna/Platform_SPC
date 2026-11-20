@@ -11,6 +11,9 @@ interface DraftExercise {
   chapter: string;
   difficulty: "Guidé" | "Standard" | "Type Bac";
   skills: string[];
+  lessonTitle?: string;
+  lessonContent?: string;
+  workedExample?: string;
   statement: string;
   params: { name: string; range: string; unit: string }[];
   questions: { prompt: string; type: string; expected: string; hint?: string; misconception: string }[];
@@ -172,10 +175,64 @@ export default function TeacherCreateExercisePage() {
   const [level, setLevel] = useState<Level>("Terminale");
   const [difficulty, setDifficulty] = useState<"Guidé" | "Standard" | "Type Bac">("Type Bac");
   const [questionCount, setQuestionCount] = useState<number>(5);
+  const [showInStudentBank, setShowInStudentBank] = useState<boolean>(true);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null);
+  const [photoMime, setPhotoMime] = useState<string>("image/jpeg");
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [draft, setDraft] = useState<DraftExercise | null>(null);
   const [providerUsed, setProviderUsed] = useState<string | null>(null);
   const [publishedBanner, setPublishedBanner] = useState(false);
+
+  const handlePhotoFile = (file: File | null) => {
+    setPhotoError(null);
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Sélectionne une image (JPG, PNG, WEBP) de ta feuille de cours ou exercice.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      setPhotoPreview(dataUrl);
+      const parts = dataUrl.split(",");
+      setPhotoBase64(parts[1] || null);
+      setPhotoMime(file.type || "image/jpeg");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleGenerateFromPhoto = async () => {
+    if (!photoBase64) return;
+    setIsGenerating(true);
+    setPublishedBanner(false);
+    setPhotoError(null);
+    try {
+      const res = await fetch("/api/exercises/from-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: photoBase64,
+          mimeType: photoMime,
+          level,
+          difficulty,
+          questionCount,
+          extraInstructions: prompt,
+        }),
+      });
+      const data = await res.json();
+      if (data.draft) {
+        setDraft(data.draft);
+        setProviderUsed(data.provider || "gemini_vision");
+      } else {
+        setPhotoError(data.error || "Impossible d'analyser cette photo. Essaie avec une image plus nette.");
+      }
+    } catch {
+      setPhotoError("Erreur réseau lors de l'analyse photo.");
+    }
+    setIsGenerating(false);
+  };
 
   const handlePromptChange = (val: string) => {
     setPrompt(val);
@@ -281,6 +338,10 @@ export default function TeacherCreateExercisePage() {
       status: "published",
       version: "v1.0",
       skills: draft.skills,
+      lessonTitle: draft.lessonTitle || `Rappel — ${draft.chapter || draft.title}`,
+      lessonContent: draft.lessonContent || "",
+      workedExample: draft.workedExample || "",
+      showInStudentBank,
       statement: draft.statement,
       questions: draft.questions
         .filter((q) => q.prompt.trim().length > 0)
@@ -394,11 +455,52 @@ export default function TeacherCreateExercisePage() {
               </div>
             </div>
 
-            {/* Optional PDF/Photo import box */}
-            <div className="border-2 border-dashed border-slate-200 rounded-2xl p-4 text-center bg-slate-50/50">
-              <div className="text-lg mb-1">📄</div>
-              <div className="text-xs font-semibold text-slate-700">Ou importez un ancien sujet (PDF / photo)</div>
-              <div className="text-[11px] text-slate-400 mt-0.5">L&apos;IA extrait l&apos;énoncé et génère des variantes paramétrées</div>
+            {/* Real Photo / Paper Course Sheet Import */}
+            <div className="border-2 border-dashed border-indigo-200 rounded-2xl p-4 bg-indigo-50/40 space-y-3">
+              <div className="text-center">
+                <div className="text-lg mb-1">📸</div>
+                <div className="text-xs font-bold text-slate-800">
+                  Photo de feuille de cours ou d&apos;exercice papier
+                </div>
+                <div className="text-[11px] text-slate-500 mt-0.5">
+                  Prends en photo ou importe une image : l&apos;IA crée la <strong>fiche de cours</strong> + les <strong>{questionCount} questions</strong>.
+                </div>
+              </div>
+              <label className="block w-full text-center cursor-pointer bg-white border border-indigo-200 hover:border-indigo-400 text-indigo-700 text-xs font-bold py-2.5 px-4 rounded-xl transition-colors">
+                {photoPreview ? "🔄 Changer la photo" : "📷 Choisir / Prendre une photo"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={(e) => handlePhotoFile(e.target.files?.[0] || null)}
+                  className="hidden"
+                />
+              </label>
+              {photoPreview && (
+                <div className="space-y-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={photoPreview}
+                    alt="Aperçu feuille de cours"
+                    className="w-full max-h-40 object-contain rounded-xl border border-indigo-100 bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateFromPhoto}
+                    disabled={isGenerating}
+                    className="w-full bg-violet-600 text-white text-xs font-bold py-2.5 rounded-xl hover:bg-violet-700 transition-colors disabled:opacity-60"
+                  >
+                    {isGenerating
+                      ? "⏳ Lecture de la feuille par Gemini Vision…"
+                      : `📸 Extraire cours + ${questionCount} questions depuis cette photo`}
+                  </button>
+                </div>
+              )}
+              {photoError && (
+                <div className="text-xs text-rose-600 font-semibold bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                  {photoError}
+                </div>
+              )}
             </div>
 
             <button
@@ -406,7 +508,7 @@ export default function TeacherCreateExercisePage() {
               disabled={isGenerating}
               className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 disabled:opacity-60"
             >
-              {isGenerating ? "⏳ Génération & vérification mathématique…" : "✨ Générer le brouillon vérifié"}
+              {isGenerating ? "⏳ Génération & vérification mathématique…" : `✨ Générer cours + ${questionCount} questions par texte`}
             </button>
           </div>
         </div>
@@ -623,6 +725,69 @@ export default function TeacherCreateExercisePage() {
                   ))}
                 </ul>
               </div>
+
+              {/* Editable Lesson Sheet (Fiche de cours) */}
+              <div className="bg-indigo-50/60 border border-indigo-200 rounded-2xl p-4 space-y-3">
+                <div className="text-xs font-extrabold text-indigo-900">
+                  📖 Fiche de cours associée (modifiable — visible par les élèves via le bouton « Fiche de cours »)
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-indigo-700 mb-1">
+                    Titre de la fiche de cours
+                  </label>
+                  <input
+                    type="text"
+                    value={draft.lessonTitle || ""}
+                    onChange={(e) => setDraft({ ...draft, lessonTitle: e.target.value })}
+                    placeholder={`ex : Rappel de cours — ${draft.chapter || draft.title}`}
+                    className="w-full border border-indigo-100 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-900 bg-white outline-none focus:border-indigo-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-indigo-700 mb-1">
+                    Cours &amp; formules essentielles (formules KaTeX entre $...$)
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={draft.lessonContent || ""}
+                    onChange={(e) => setDraft({ ...draft, lessonContent: e.target.value })}
+                    placeholder="Résumé des lois, définitions et unités SI du chapitre…"
+                    className="w-full border border-indigo-100 rounded-xl px-3 py-2 text-xs text-slate-800 bg-white outline-none focus:border-indigo-400"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-indigo-700 mb-1">
+                    Exemple résolu (optionnel)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={draft.workedExample || ""}
+                    onChange={(e) => setDraft({ ...draft, workedExample: e.target.value })}
+                    placeholder="Ex : Application numérique guidée étape par étape…"
+                    className="w-full border border-indigo-100 rounded-xl px-3 py-2 text-xs text-slate-800 bg-white outline-none focus:border-indigo-400"
+                  />
+                </div>
+              </div>
+
+              {/* Publish to Student Bank toggle */}
+              <label className="flex items-start gap-3 cursor-pointer bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4">
+                <input
+                  type="checkbox"
+                  checked={showInStudentBank}
+                  onChange={(e) => setShowInStudentBank(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-emerald-600 shrink-0"
+                />
+                <div>
+                  <div className="text-xs font-bold text-emerald-900">
+                    📚 Ajouter à la banque d&apos;exercices &amp; cours libre des élèves
+                  </div>
+                  <div className="text-[11px] text-emerald-700 mt-0.5">
+                    {showInStudentBank
+                      ? "Cet exercice et sa fiche de cours apparaîtront dans le catalogue en bas de « Exercices & cours » pour que tes élèves puissent s'entraîner librement."
+                      : "Resté privé dans ta bibliothèque enseignant (visible uniquement quand tu l'assignes en devoir)."}
+                  </div>
+                </div>
+              </label>
 
               {/* Publish buttons */}
               <div className="flex items-center gap-3 pt-2">
