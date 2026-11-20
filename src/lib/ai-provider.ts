@@ -1,8 +1,6 @@
 /**
  * Provider-agnostic AI Gateway (Vision Doc §9.3 & §15 Principle #12)
- * Supports:
- *  - Anthropic Claude API (ANTHROPIC_API_KEY)
- *  - Google Gemini API via AI Studio (`AIza...`) AND Vertex AI Express Mode (`AQ....`)
+ * Supports Anthropic Claude API (ANTHROPIC_API_KEY) and Google Gemini API (GEMINI_API_KEY).
  * Enforces per-user daily quotas to keep costs predictable across 600+ students.
  */
 
@@ -46,11 +44,14 @@ export function getActiveAIProvider(): "claude" | "gemini" | "fallback" {
   return "fallback";
 }
 
-function getGeminiUrls(model: string, apiKey: string): string[] {
-  const encodedKey = encodeURIComponent(apiKey);
-  const aiStudio = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodedKey}`;
-  const vertexExpress = `https://aiplatform.googleapis.com/v1/publishers/google/models/${model}:generateContent?key=${encodedKey}`;
-  return [aiStudio, vertexExpress];
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function callTextAI(params: {
@@ -62,7 +63,7 @@ export async function callTextAI(params: {
   const maxTokens = params.maxTokens ?? 500;
 
   if (provider === "claude") {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -87,11 +88,9 @@ export async function callTextAI(params: {
     const apiKey = process.env.GEMINI_API_KEY!.trim();
     const models = Array.from(
       new Set([
-        process.env.GEMINI_MODEL || "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-flash-latest",
+        process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.8-flash",
       ])
     );
     const contents = params.messages.map((m) => ({
@@ -100,25 +99,30 @@ export async function callTextAI(params: {
     }));
 
     for (const model of models) {
-      for (const url of getGeminiUrls(model, apiKey)) {
-        try {
-          const res = await fetch(url, {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
+          apiKey
+        )}`;
+        const res = await fetchWithTimeout(
+          url,
+          {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              systemInstruction: { role: "system", parts: [{ text: params.system }] },
+              systemInstruction: { parts: [{ text: params.system }] },
               contents,
               generationConfig: { maxOutputTokens: maxTokens, temperature: 0.4 },
             }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (text) return { text, provider: "gemini" };
-          }
-        } catch {
-          continue;
+          },
+          10000
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) return { text, provider: "gemini" };
         }
+      } catch {
+        continue;
       }
     }
   }
@@ -135,7 +139,7 @@ export async function callVisionAI(params: {
   const provider = getActiveAIProvider();
 
   if (provider === "claude") {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -175,22 +179,24 @@ export async function callVisionAI(params: {
     const apiKey = process.env.GEMINI_API_KEY!.trim();
     const models = Array.from(
       new Set([
-        process.env.GEMINI_MODEL || "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-flash-latest",
+        process.env.GEMINI_MODEL || "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.8-flash",
       ])
     );
 
     for (const model of models) {
-      for (const url of getGeminiUrls(model, apiKey)) {
-        try {
-          const res = await fetch(url, {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
+          apiKey
+        )}`;
+        const res = await fetchWithTimeout(
+          url,
+          {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              systemInstruction: { role: "system", parts: [{ text: params.system }] },
+              systemInstruction: { parts: [{ text: params.system }] },
               contents: [
                 {
                   role: "user",
@@ -202,15 +208,16 @@ export async function callVisionAI(params: {
               ],
               generationConfig: { maxOutputTokens: 900, temperature: 0.2 },
             }),
-          });
-          if (res.ok) {
-            const data = await res.json();
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (text) return { text, provider: "gemini" };
-          }
-        } catch {
-          continue;
+          },
+          12000
+        );
+        if (res.ok) {
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text) return { text, provider: "gemini" };
         }
+      } catch {
+        continue;
       }
     }
   }
