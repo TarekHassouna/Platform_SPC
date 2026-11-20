@@ -88,6 +88,8 @@ export interface AssignmentItem {
 
 export interface CopySubmission {
   id: string;
+  studentId: string;
+  evaluationResultId?: string;
   studentName: string;
   classId: string;
   assignmentTitle: string;
@@ -336,6 +338,9 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
           if (s.input_mode === "photo") {
             const rawAns = (s.raw_answers as Record<string, unknown>) || {};
             const rawLines = Array.isArray(rawAns.lines) ? rawAns.lines : [];
+            const rawSteps = Array.isArray(rawAns.steps)
+              ? (rawAns.steps as Array<Record<string, unknown>>)
+              : [];
             const studentClass = (dbClasses || []).find((c: Record<string, unknown>) =>
               ((c.class_members as Array<Record<string, unknown>>) || []).some(
                 (cm) => String(cm.student_id) === sid
@@ -350,6 +355,8 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
 
             realPhotoCopies.push({
               id: String(s.id),
+              studentId: sid,
+              evaluationResultId: ev?.id ? String(ev.id) : undefined,
               studentName: p ? `${p.first_name || ""} ${p.last_name || ""}`.trim() : "Élève",
               classId: studentClass ? String(studentClass.id) : "",
               assignmentTitle: String(
@@ -358,20 +365,39 @@ export function TeacherStoreProvider({ children }: { children: ReactNode }) {
               ),
               submittedAt: new Date(String(s.created_at)).toLocaleString("fr-FR"),
               status: "to_review",
-              aiScore: Number((score * 10).toFixed(1)),
+              aiScore: Number(((pct / 100) * 20).toFixed(1)),
               maxScore: 20,
-              teacherScore: Number((score * 10).toFixed(1)),
-              confidence: "Haute",
-              transcription: rawLines.map((line: Record<string, unknown>, idx: number) => ({
-                step: idx + 1,
-                latex: String(line.text || ""),
-                verdict: line.confidence === "low" ? "uncertain" : "correct",
-                note:
+              teacherScore: Number(((pct / 100) * 20).toFixed(1)),
+              confidence: rawLines.some((l: Record<string, unknown>) => l.confidence === "low")
+                ? "Faible"
+                : rawLines.some((l: Record<string, unknown>) => l.confidence === "medium")
+                ? "Moyenne"
+                : "Haute",
+              transcription: rawLines.map((line: Record<string, unknown>, idx: number) => {
+                const matchedStep = rawSteps.find(
+                  (st) => Number(st.lineId) === Number(line.id ?? idx + 1)
+                );
+                const stepVerdict = String(matchedStep?.verdict || "");
+                const verdict: CopySubmission["transcription"][number]["verdict"] =
                   line.confidence === "low"
+                    ? "uncertain"
+                    : stepVerdict === "error"
+                    ? "error"
+                    : stepVerdict === "partial"
+                    ? "partial"
+                    : "correct";
+                return {
+                  step: idx + 1,
+                  latex: String(line.text || ""),
+                  verdict,
+                  note: matchedStep?.comment
+                    ? String(matchedStep.comment)
+                    : line.confidence === "low"
                     ? "Ligne incertaine à vérifier visuellement"
                     : "Transcrit et confirmé par l'élève",
-              })),
-              teacherComment: "",
+                };
+              }),
+              teacherComment: ev?.feedback_summary ? String(ev.feedback_summary) : "",
             });
           }
         });

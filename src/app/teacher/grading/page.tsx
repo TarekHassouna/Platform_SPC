@@ -4,7 +4,8 @@ import { useTeacherStore } from "@/lib/teacher-store";
 import { TeacherShell } from "@/components/TeacherShell";
 
 export default function TeacherGradingPage() {
-  const { classes, selectedClassId, copies, updateCopy } = useTeacherStore();
+  const { classes, selectedClassId, copies, updateCopy, updateStudentAttemptGrade } =
+    useTeacherStore();
 
   const visibleCopies = copies.filter(
     (c) => selectedClassId === "all" || c.classId === selectedClassId
@@ -16,11 +17,25 @@ export default function TeacherGradingPage() {
   const activeCopy =
     visibleCopies.find((c) => c.id === activeCopyId) || visibleCopies[0] || null;
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (!activeCopy) return;
     updateCopy(activeCopy.id, { status: "published" });
-    setToast(`✅ Copie de ${activeCopy.studentName} publiée (${activeCopy.teacherScore}/${activeCopy.maxScore})`);
-    setTimeout(() => setToast(null), 3500);
+    const res = await updateStudentAttemptGrade({
+      studentId: activeCopy.studentId,
+      submissionId: activeCopy.id,
+      evaluationResultId: activeCopy.evaluationResultId,
+      newScore: activeCopy.teacherScore,
+      maxScore: activeCopy.maxScore,
+      teacherComment: activeCopy.teacherComment,
+    });
+    if (res.ok) {
+      setToast(
+        `✅ Copie de ${activeCopy.studentName} validée et note enregistrée dans Supabase (${activeCopy.teacherScore}/${activeCopy.maxScore})`
+      );
+    } else {
+      setToast(`⚠️ ${res.error || "Erreur lors de l'enregistrement de la note."}`);
+    }
+    setTimeout(() => setToast(null), 4000);
   };
 
   return (

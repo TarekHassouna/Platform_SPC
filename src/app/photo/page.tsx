@@ -13,6 +13,16 @@ interface TranscribedLine {
   confidence: "high" | "medium" | "low";
 }
 
+interface PhotoAnalysis {
+  status: "correct" | "partially_correct" | "incorrect";
+  score: number;
+  maxScore: number;
+  errorCode: string | null;
+  summary: string;
+  tutorReply: string;
+  steps: { lineId: number; verdict: "correct" | "error" | "partial" | "info"; comment: string }[];
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -25,6 +35,13 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+const VERDICT_STYLE: Record<string, { box: string; label: string }> = {
+  correct: { box: "bg-emerald-50 border-emerald-200 text-emerald-900", label: "✅ Correct" },
+  error: { box: "bg-rose-50 border-rose-200 text-rose-900", label: "❌ Erreur" },
+  partial: { box: "bg-amber-50 border-amber-200 text-amber-900", label: "⚠️ Partiel" },
+  info: { box: "bg-slate-50 border-slate-200 text-slate-800", label: "ℹ️ Info" },
+};
+
 export default function PhotoSubmissionPage() {
   const { user, logout } = useAuth();
   const router = useRouter();
@@ -34,30 +51,40 @@ export default function PhotoSubmissionPage() {
   const [lines, setLines] = useState<TranscribedLine[]>([]);
   const [studentQuestion, setStudentQuestion] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [storagePath, setStoragePath] = useState<string | null>(null);
-  const [provider, setProvider] = useState<string | null>(null);
   const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<PhotoAnalysis | null>(null);
+  const [savedToDb, setSavedToDb] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const runTranscription = async (file?: File) => {
+  const resetAll = () => {
+    setStep("upload");
+    setLines([]);
+    setAnalysis(null);
+    setSavedToDb(false);
+    setStoragePath(null);
+    setFileName(null);
+    setPreviewUrl(null);
+    setErrorMsg(null);
+  };
+
+  const runTranscription = async (file: File) => {
     setErrorMsg(null);
     setUploading(true);
+    setAnalysis(null);
+    setSavedToDb(false);
     try {
-      let imageBase64: string | undefined;
-      let mimeType: string | undefined;
-
-      if (file) {
-        setFileName(file.name);
-        if (user?.id) {
-          const up = await uploadStudentPhoto(user.id, file);
-          if (up.path) setStoragePath(up.path);
-        }
-        imageBase64 = await fileToBase64(file);
-        mimeType = file.type || "image/jpeg";
-      } else {
-        setFileName("exemple_loi_ohm_manuscrit.jpg");
+      setFileName(file.name);
+      setPreviewUrl(URL.createObjectURL(file));
+      if (user?.id) {
+        const up = await uploadStudentPhoto(user.id, file);
+        if (up.path) setStoragePath(up.path);
       }
+      const imageBase64 = await fileToBase64(file);
+      const mimeType = file.type || "image/jpeg";
 
       const res = await fetch("/api/vision/transcribe", {
         method: "POST",
@@ -71,20 +98,68 @@ export default function PhotoSubmissionPage() {
         }),
       });
       const data = await res.json();
+      if (data.quota) setQuotaInfo({ remaining: data.quota.remaining, limit: data.quota.limit });
       if (!res.ok) {
         setErrorMsg(data.error || "Erreur lors de la lecture de la photo.");
         setUploading(false);
         return;
       }
-
       setLines(data.lines || []);
-      if (data.provider) setProvider(data.provider);
-      if (data.quota) setQuotaInfo({ remaining: data.quota.remaining, limit: data.quota.limit });
       setStep("confirm");
     } catch {
       setErrorMsg("Impossible d'analyser l'image pour le moment.");
     }
     setUploading(false);
+  };
+
+  const confirmAndAnalyze = async () => {
+    setErrorMsg(null);
+    setAnalyzing(true);
+    let result: PhotoAnalysis | null = null;
+    try {
+      const res = await fetch("/api/vision/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          questionText: studentQuestion,
+          lines: lines.map((l) => ({ id: l.id, text: l.text })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.analysis) {
+        setErrorMsg(data.error || "L'analyse n'a pas abouti. Réessaie.");
+        setAnalyzing(false);
+        return;
+      }
+      result = data.analysis;
+      setAnalysis(result);
+    } catch {
+      setErrorMsg("Erreur réseau pendant l'analyse.");
+      setAnalyzing(false);
+      return;
+    }
+
+    if (user?.id && result) {
+      const saved = await recordPhotoSubmission({
+        studentId: user.id,
+        fileName: fileName || "copie_manuscrite.jpg",
+        storagePath,
+        mode,
+        lines,
+        analysis: {
+          status: result.status,
+          score: result.score,
+          maxScore: result.maxScore,
+          summary: result.summary,
+          errorCode: result.errorCode || undefined,
+          steps: result.steps,
+        },
+      });
+      setSavedToDb(saved.ok);
+    }
+    setAnalyzing(false);
+    setStep("result");
   };
 
   const handleLogout = async () => {
@@ -119,11 +194,9 @@ export default function PhotoSubmissionPage() {
 
       <main className="max-w-4xl mx-auto p-6 lg:p-10">
         <div className="mb-8">
-          <h1 className="text-2xl font-extrabold text-slate-900 mb-1">
-            Soumets une photo de ta copie papier
-          </h1>
+          <h1 className="text-2xl font-extrabold text-slate-900 mb-1">Soumets une photo de ta copie papier</h1>
           <p className="text-slate-500 text-sm">
-            Le bac se fait sur papier : photographie ton raisonnement, vérifie la lecture, puis obtiens une correction étape par étape.
+            Photographie ton raisonnement, vérifie la lecture, puis obtiens une correction réelle par l&apos;IA.
           </p>
         </div>
 
@@ -136,16 +209,17 @@ export default function PhotoSubmissionPage() {
         <div className="grid sm:grid-cols-3 gap-3 mb-8">
           {[
             { id: "question" as PhotoMode, icon: "❓", title: "« J'ai une question »", desc: "Photo + question — le tuteur te guide sur ton vrai brouillon" },
-            { id: "correct" as PhotoMode, icon: "✍️", title: "« Corrige-moi »", desc: "Première erreur pointée, explication et corrigé détaillé" },
-            { id: "grade" as PhotoMode, icon: "🎓", title: "« Note-moi »", desc: "Notation type Bac sur barème officiel avec points par question" },
+            { id: "correct" as PhotoMode, icon: "✍️", title: "« Corrige-moi »", desc: "Première erreur pointée, explication et bonne démarche" },
+            { id: "grade" as PhotoMode, icon: "🎓", title: "« Note-moi »", desc: "Notation type Bac sur 10 avec crédit partiel" },
           ].map((m) => (
             <button
               key={m.id}
-              onClick={() => setMode(m.id)}
-              className={`text-left rounded-2xl p-4 border transition-all ${
+              onClick={() => step === "upload" && setMode(m.id)}
+              disabled={step !== "upload"}
+              className={`text-left rounded-2xl p-4 border transition-all disabled:cursor-not-allowed ${
                 mode === m.id
                   ? "bg-indigo-50 border-indigo-400 ring-2 ring-indigo-100"
-                  : "bg-white border-slate-200 hover:border-indigo-200"
+                  : "bg-white border-slate-200 hover:border-indigo-200 disabled:opacity-60"
               }`}
             >
               <div className="text-2xl mb-1.5">{m.icon}</div>
@@ -164,9 +238,7 @@ export default function PhotoSubmissionPage() {
             <div key={s.id} className="flex items-center gap-2">
               <span
                 className={`px-3 py-1 rounded-full ${
-                  step === s.id
-                    ? "bg-indigo-600 text-white"
-                    : "bg-white border border-slate-200 text-slate-500"
+                  step === s.id ? "bg-indigo-600 text-white" : "bg-white border border-slate-200 text-slate-500"
                 }`}
               >
                 {s.label}
@@ -180,9 +252,7 @@ export default function PhotoSubmissionPage() {
           <div className="bg-white rounded-3xl border border-slate-100 p-8 shadow-sm text-center">
             <div className="border-2 border-dashed border-indigo-200 rounded-3xl p-10 bg-indigo-50/30">
               <div className="text-4xl mb-3">📷</div>
-              <h2 className="font-bold text-slate-900 text-base mb-1">
-                Prends en photo ou importe ta feuille
-              </h2>
+              <h2 className="font-bold text-slate-900 text-base mb-1">Prends en photo ou importe ta feuille</h2>
               <p className="text-xs text-slate-500 mb-6">
                 Stockage privé Supabase Storage · Supprimé automatiquement après 90 jours
               </p>
@@ -202,29 +272,25 @@ export default function PhotoSubmissionPage() {
                 </div>
               )}
 
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-                <label className="cursor-pointer bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm shadow-md shadow-indigo-100">
-                  {uploading ? "⏳ Lecture en cours…" : "Choisir une photo"}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={uploading}
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) runTranscription(f);
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
+              <label
+                className={`inline-block cursor-pointer bg-indigo-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm shadow-md shadow-indigo-100 ${
+                  uploading ? "opacity-60 pointer-events-none" : ""
+                }`}
+              >
+                {uploading ? "⏳ Lecture de ta copie par l'IA…" : "📷 Choisir / Prendre une photo"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
                   disabled={uploading}
-                  onClick={() => runTranscription()}
-                  className="bg-white border border-slate-200 text-slate-700 font-semibold px-5 py-3 rounded-xl hover:border-indigo-300 text-sm disabled:opacity-50"
-                >
-                  Tester avec un exemple manuscrit →
-                </button>
-              </div>
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) runTranscription(f);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
             </div>
           </div>
         )}
@@ -237,16 +303,24 @@ export default function PhotoSubmissionPage() {
                 <p className="text-xs text-slate-500">
                   Fichier : <span className="font-mono">{fileName}</span>
                   {storagePath && <span className="ml-2 text-emerald-600">✓ Stocké en privé</span>}
-                  {provider && <span className="ml-2 font-mono text-slate-400">({provider})</span>}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Corrige les lignes mal lues avant l&apos;analyse — la correction se basera exactement sur ce texte.
                 </p>
               </div>
-              <button
-                onClick={() => setStep("upload")}
-                className="text-xs font-semibold text-slate-500 hover:text-slate-800"
-              >
+              <button onClick={resetAll} className="text-xs font-semibold text-slate-500 hover:text-slate-800">
                 Changer de photo
               </button>
             </div>
+
+            {previewUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={previewUrl}
+                alt="Ta copie"
+                className="w-full max-h-64 object-contain rounded-2xl border border-slate-200 bg-slate-50"
+              />
+            )}
 
             <div className="space-y-3">
               {lines.map((line, idx) => (
@@ -262,110 +336,139 @@ export default function PhotoSubmissionPage() {
                 >
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-xs font-bold text-slate-500">Ligne {idx + 1}</span>
-                    <span
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                        line.confidence === "low"
-                          ? "bg-rose-200 text-rose-900"
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                          line.confidence === "low"
+                            ? "bg-rose-200 text-rose-900"
+                            : line.confidence === "medium"
+                            ? "bg-amber-200 text-amber-900"
+                            : "bg-emerald-100 text-emerald-700"
+                        }`}
+                      >
+                        {line.confidence === "low"
+                          ? "❌ Illisible — réécris-la"
                           : line.confidence === "medium"
-                          ? "bg-amber-200 text-amber-900"
-                          : "bg-emerald-100 text-emerald-700"
-                      }`}
-                    >
-                      {line.confidence === "low"
-                        ? "❌ Illisible — merci de réécrire"
-                        : line.confidence === "medium"
-                        ? "⚠️ Lecture à vérifier"
-                        : "✓ Haute confiance"}
-                    </span>
+                          ? "⚠️ Lecture à vérifier"
+                          : "✓ Haute confiance"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setLines((prev) => prev.filter((l) => l.id !== line.id))}
+                        className="text-[11px] text-slate-400 hover:text-rose-600"
+                        title="Supprimer cette ligne"
+                      >
+                        🗑️
+                      </button>
+                    </div>
                   </div>
                   <input
                     type="text"
                     value={line.text}
                     onChange={(e) =>
                       setLines((prev) =>
-                        prev.map((l) => (l.id === line.id ? { ...l, text: e.target.value } : l))
+                        prev.map((l) => (l.id === line.id ? { ...l, text: e.target.value, confidence: "high" } : l))
                       )
                     }
                     className="w-full font-mono text-sm text-slate-900 bg-white border border-slate-200 rounded-xl px-3.5 py-2 outline-none focus:border-indigo-400"
                   />
                 </div>
               ))}
+              <button
+                type="button"
+                onClick={() =>
+                  setLines((prev) => [
+                    ...prev,
+                    { id: (prev[prev.length - 1]?.id || 0) + 1, text: "", confidence: "high" },
+                  ])
+                }
+                className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg"
+              >
+                + Ajouter une ligne oubliée
+              </button>
             </div>
 
             <button
-              onClick={async () => {
-                if (user?.id) {
-                  await recordPhotoSubmission({
-                    studentId: user.id,
-                    fileName: fileName || "copie_manuscrite.jpg",
-                    storagePath,
-                    mode,
-                    lines,
-                  });
-                }
-                setStep("result");
-              }}
-              className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100"
+              onClick={confirmAndAnalyze}
+              disabled={analyzing || lines.every((l) => !l.text.trim())}
+              className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100 disabled:opacity-60"
             >
-              ✅ Confirmer la lecture et analyser
+              {analyzing ? "⏳ Correction par l'IA en cours…" : "✅ Confirmer la lecture et analyser"}
             </button>
           </div>
         )}
 
-        {step === "result" && (
+        {step === "result" && analysis && (
           <div className="bg-white rounded-3xl border border-slate-100 p-7 shadow-sm space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <h2 className="text-lg font-extrabold text-slate-900">
                 {mode === "grade"
-                  ? "🎓 Note estimée : 5,5 / 10 (Crédit partiel appliqué)"
+                  ? `🎓 Note estimée : ${analysis.score.toFixed(1).replace(".", ",")} / ${analysis.maxScore}`
                   : mode === "question"
                   ? "❓ Réponse du tuteur sur ton brouillon"
                   : "✍️ Correction étape par étape"}
               </h2>
-              <span className="text-xs font-bold bg-rose-100 text-rose-700 px-3 py-1 rounded-full font-mono">
-                formule_inversee
-              </span>
+              <div className="flex items-center gap-2">
+                {mode !== "grade" && (
+                  <span className="text-xs font-bold bg-slate-100 text-slate-700 px-3 py-1 rounded-full">
+                    {analysis.score.toFixed(1).replace(".", ",")} / {analysis.maxScore}
+                  </span>
+                )}
+                {analysis.errorCode && (
+                  <span className="text-xs font-bold bg-rose-100 text-rose-700 px-3 py-1 rounded-full font-mono">
+                    {analysis.errorCode}
+                  </span>
+                )}
+              </div>
             </div>
 
+            <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-sm text-indigo-900">
+              <strong>Bilan : </strong>
+              {analysis.summary}
+            </div>
+
+            {analysis.tutorReply && (
+              <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4 text-sm text-violet-900 whitespace-pre-line">
+                <strong>💬 Tuteur : </strong>
+                {analysis.tutorReply}
+              </div>
+            )}
+
             <div className="space-y-2.5 text-sm">
-              {lines.map((l, idx) => (
-                <div
-                  key={l.id}
-                  className={`rounded-2xl border p-4 ${
-                    idx === 1
-                      ? "bg-rose-50 border-rose-200 text-rose-900"
-                      : idx === 2
-                      ? "bg-indigo-50 border-indigo-200 text-indigo-900"
-                      : "bg-emerald-50 border-emerald-200 text-emerald-900"
-                  }`}
-                >
-                  <strong>
-                    {idx === 0 ? "✅ Étape 1 : " : idx === 1 ? "❌ Étape 2 (erreur détectée) : " : "✓ Étape 3 : "}
-                  </strong>
-                  <span className="font-mono text-xs bg-white/80 px-1.5 py-0.5 rounded mr-2">{l.text}</span>
-                  {idx === 1 && (
-                    <span className="block mt-1">
-                      La formule de la loi d&apos;Ohm est U = R × I, donc I = U / R (et non R / U).
-                    </span>
-                  )}
-                  {idx === 2 && (
-                    <span className="block mt-1">
-                      Non pénalisée deux fois : avec la bonne formule, I = 12 / 47 ≈ 0,26 A (2 chiffres significatifs).
-                    </span>
-                  )}
-                </div>
-              ))}
+              {lines
+                .filter((l) => l.text.trim())
+                .map((l, idx) => {
+                  const st = analysis.steps.find((s) => s.lineId === l.id);
+                  const style = VERDICT_STYLE[st?.verdict || "info"];
+                  return (
+                    <div key={l.id} className={`rounded-2xl border p-4 ${style.box}`}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <strong>
+                          {style.label} · Ligne {idx + 1}
+                        </strong>
+                        <span className="font-mono text-xs bg-white/80 px-1.5 py-0.5 rounded">{l.text}</span>
+                      </div>
+                      {st?.comment && <span className="block mt-1.5 text-xs">{st.comment}</span>}
+                    </div>
+                  );
+                })}
+            </div>
+
+            <div className="text-xs text-slate-500">
+              {savedToDb
+                ? "✓ Copie et correction enregistrées — ton professeur peut la consulter et ajuster la note."
+                : "⚠️ Correction affichée mais non enregistrée (connexion Supabase indisponible)."}
             </div>
 
             <div className="flex flex-wrap gap-3 pt-2">
               <Link
-                href="/exercises/ohm-001"
+                href="/exercises"
                 className="flex-1 text-center bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 text-sm"
               >
-                Pratiquer cet exercice maintenant →
+                S&apos;entraîner sur des exercices →
               </Link>
               <button
-                onClick={() => setStep("upload")}
+                onClick={resetAll}
                 className="px-5 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 Nouvelle photo

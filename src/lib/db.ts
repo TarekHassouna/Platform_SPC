@@ -620,12 +620,20 @@ export async function recordPhotoSubmission(params: {
   storagePath?: string | null;
   mode: "question" | "correct" | "grade";
   lines: { id: number; text: string; confidence: string }[];
-}) {
+  analysis?: {
+    status: "correct" | "partially_correct" | "incorrect";
+    score: number;
+    maxScore: number;
+    summary: string;
+    errorCode?: string;
+    steps?: { lineId: number; verdict: string; comment: string }[];
+  } | null;
+}): Promise<{ ok: boolean; error?: string }> {
   const supabase = getSupabaseBrowserClient();
-  if (!isSupabaseConfigured || !supabase || !params.studentId) return;
+  if (!isSupabaseConfigured || !supabase || !params.studentId) return { ok: false };
 
   const expiresAt = new Date(Date.now() + 90 * 86400 * 1000).toISOString();
-  const { data: sub } = await supabase
+  const { data: sub, error } = await supabase
     .from("submissions")
     .insert({
       student_id: params.studentId,
@@ -634,23 +642,27 @@ export async function recordPhotoSubmission(params: {
         exerciseTitle: `Copie manuscrite (${params.fileName})`,
         mode: params.mode,
       },
-      raw_answers: { lines: params.lines },
+      raw_answers: { lines: params.lines, steps: params.analysis?.steps || [] },
       photo_storage_path: params.storagePath || null,
       photo_expires_at: expiresAt,
     })
     .select("id")
     .single();
 
-  if (sub?.id) {
+  if (error || !sub?.id) return { ok: false, error: error?.message };
+
+  // Only store an evaluation if the AI actually produced a real analysis (no fake scores)
+  if (params.analysis) {
     await supabase.from("evaluation_results").insert({
       submission_id: sub.id,
-      status: "partially_correct",
-      score: 1.4,
-      max_score: 2,
-      engine: "gemini_vision",
-      feedback_summary: "Copie manuscrite transcrite et confirmée",
+      status: params.analysis.status,
+      score: params.analysis.score,
+      max_score: params.analysis.maxScore,
+      engine: "gemini_photo_analysis",
+      feedback_summary: params.analysis.summary,
     });
   }
+  return { ok: true };
 }
 
 /**
