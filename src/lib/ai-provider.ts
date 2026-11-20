@@ -107,7 +107,7 @@ export async function callTextAI(params: {
     }
 
     for (const model of models) {
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
             apiKey
@@ -123,22 +123,21 @@ export async function callTextAI(params: {
                 generationConfig,
               }),
             },
-            10000
+            9000
           );
           if (res.ok) {
             const data = await res.json();
             const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
             if (text) return { text, provider: "gemini" };
-          } else if (res.status === 429 || res.status === 503) {
-            // Brief backoff before retrying transient rate-limit / overload
-            await new Promise((r) => setTimeout(r, 450 * (attempt + 1)));
+          } else if ((res.status === 429 || res.status === 503) && attempt < 2) {
+            await new Promise((r) => setTimeout(r, 550 * (attempt + 1)));
             continue;
           } else {
             break;
           }
         } catch {
-          if (attempt === 0) {
-            await new Promise((r) => setTimeout(r, 300));
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 400));
             continue;
           }
         }
