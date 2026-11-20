@@ -17,6 +17,7 @@ interface TranscribedLine {
   id: number;
   text: string;
   confidence: "high" | "medium" | "low";
+  kind?: "text" | "drawing";
 }
 
 interface PhotoAnalysis {
@@ -27,6 +28,7 @@ interface PhotoAnalysis {
   maxScore: number;
   errorCode: string | null;
   summary: string;
+  drawingFeedback?: string;
   tutorReply: string;
   rubricBreakdown?: { criterion: string; points: number; maxPoints: number; comment: string }[];
   steps: { lineId: number; verdict: "correct" | "error" | "partial" | "info"; comment: string }[];
@@ -126,6 +128,8 @@ function PhotoSubmissionContent() {
   const [studentQuestion, setStudentQuestion] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imageMime, setImageMime] = useState<string>("image/jpeg");
   const [storagePath, setStoragePath] = useState<string | null>(null);
   const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -157,6 +161,7 @@ function PhotoSubmissionContent() {
     setStoragePath(null);
     setFileName(null);
     setPreviewUrl(null);
+    setImageBase64(null);
     setErrorMsg(null);
   };
 
@@ -172,16 +177,18 @@ function PhotoSubmissionContent() {
         const up = await uploadStudentPhoto(user.id, file);
         if (up.path) setStoragePath(up.path);
       }
-      const imageBase64 = await fileToBase64(file);
-      const mimeType = file.type || "image/jpeg";
+      const b64 = await fileToBase64(file);
+      const mime = file.type || "image/jpeg";
+      setImageBase64(b64);
+      setImageMime(mime);
 
       const res = await fetch("/api/vision/transcribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: user?.id,
-          imageBase64,
-          mimeType,
+          imageBase64: b64,
+          mimeType: mime,
           mode,
           questionText: studentQuestion,
         }),
@@ -217,7 +224,9 @@ function PhotoSubmissionContent() {
           questionText: studentQuestion,
           assignmentTitle: activeMode === "grade" ? selectedDrop?.title : undefined,
           referenceCorrection: activeMode === "grade" ? selectedDrop?.referenceCorrection : undefined,
-          lines: lines.map((l) => ({ id: l.id, text: l.text })),
+          imageBase64: imageBase64 || undefined,
+          mimeType: imageMime,
+          lines: lines.map((l) => ({ id: l.id, text: l.text, kind: l.kind })),
         }),
       });
       const data = await res.json();
@@ -301,7 +310,12 @@ function PhotoSubmissionContent() {
           ? "Peux-tu m'aider à comprendre cet exercice ?"
           : "Peux-tu m'expliquer la correction de ma copie ?"),
       summary: analysis.summary,
-      tutorReply: analysis.tutorReply,
+      tutorReply: [
+        analysis.drawingFeedback ? `**Analyse du schéma :** ${analysis.drawingFeedback}` : "",
+        analysis.tutorReply,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       steps: analysis.steps,
       createdAt: Date.now(),
     };
@@ -603,7 +617,14 @@ function PhotoSubmissionContent() {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-xs font-bold text-slate-500">Ligne {idx + 1}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-500">Ligne {idx + 1}</span>
+                      {line.kind === "drawing" && (
+                        <span className="text-[10px] font-bold bg-cyan-100 text-cyan-800 px-2 py-0.5 rounded-full">
+                          🎨 Schéma / Dessin détecté
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2">
                       <span
                         className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
@@ -735,6 +756,14 @@ function PhotoSubmissionContent() {
                   <strong>Bilan : </strong>
                   <MathText text={analysis.summary} />
                 </div>
+
+                {/* Dedicated Student Drawing / Schema Feedback */}
+                {analysis.drawingFeedback && (
+                  <div className="bg-cyan-50 border border-cyan-200 rounded-2xl p-4 text-sm text-cyan-950 whitespace-pre-line leading-relaxed">
+                    <strong>🎨 Analyse de ton schéma / dessin : </strong>
+                    <MathText text={analysis.drawingFeedback} />
+                  </div>
+                )}
 
                 {/* Tutor Reply */}
                 {analysis.tutorReply && (

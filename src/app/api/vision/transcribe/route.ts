@@ -36,13 +36,16 @@ export async function POST(req: NextRequest) {
   }
 
   const system =
-    "Tu es un moteur de transcription manuscrite de Physique-Chimie (lycée français). " +
-    "Transcris FIDÈLEMENT ce qui est écrit sur la photo, ligne par ligne, sans corriger les erreurs de l'élève. " +
+    "Tu es un moteur de transcription manuscrite ET visuelle de Physique-Chimie (lycée français). " +
+    "Transcris FIDÈLEMENT tout ce qui est sur la photo, sans corriger les erreurs de l'élève : " +
+    "1) Toutes les lignes de texte, énoncés, équations, calculs et résultats. " +
+    "2) N'IGNORE JAMAIS LES DESSINS / SCHÉMAS DE L'ÉLÈVE ! Si la photo contient un schéma, dessin, circuit électrique, bilan des forces (vecteurs, sens des flèches, longueurs), graphique (axes, unités, allure de la courbe, tangente), schéma optique (rayons, lentille, normale), montage de chimie, tableau d'avancement ou formule de Lewis / molécule : ajoute une ligne commençant par '[Schéma] ' qui décrit PRÉCISÉMENT et fidèlement ce que l'élève a dessiné (y compris ses éventuelles erreurs d'orientation ou d'oubli). " +
     "RÈGLE ABSOLUE : ne devine jamais ce qui est illisible ; marque-le confidence: 'low'. " +
-    "Si l'image ne contient aucune écriture exploitable, retourne {\"lines\": []}. " +
-    'Retourne UNIQUEMENT un JSON valide : {"lines": [{"id": 1, "text": "...", "confidence": "high"|"medium"|"low"}]}';
+    'Si l\'image ne contient aucune écriture ni dessin exploitable, retourne {"lines": []}. ' +
+    'Retourne UNIQUEMENT un JSON valide : {"lines": [{"id": 1, "text": "...", "confidence": "high"|"medium"|"low", "kind": "text"|"drawing"}]}';
+
   const prompt =
-    "Transcris ligne par ligne les énoncés, étapes de calcul, formules et résultats visibles sur cette feuille de Physique-Chimie.";
+    "Transcris ligne par ligne TOUT ce que l'élève a écrit (formules, calculs, texte) ET décris fidèlement chaque schéma, vecteur, circuit, graphique, tableau ou molécule dessiné sur cette feuille de Physique-Chimie.";
 
   try {
     const visionRes = await callVisionAI({
@@ -50,7 +53,7 @@ export async function POST(req: NextRequest) {
       prompt,
       imageBase64: payload.imageBase64,
       mimeType: payload.mimeType,
-      maxTokens: 2000,
+      maxTokens: 2400,
       jsonMode: true,
     });
 
@@ -66,6 +69,9 @@ export async function POST(req: NextRequest) {
               confidence: ["high", "medium", "low"].includes(String(l.confidence))
                 ? String(l.confidence)
                 : "medium",
+              kind: l.kind === "drawing" || /^\[sch[eé]ma|\[dessin/i.test(String(l.text || ""))
+                ? "drawing"
+                : "text",
             }))
             .filter((l: { text: string }) => l.text.length > 0);
           if (lines.length > 0) {
@@ -75,7 +81,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(
           {
             error:
-              "Aucune écriture lisible détectée sur cette photo. Reprends la photo de plus près, bien éclairée et à plat.",
+              "Aucune écriture ni schéma lisible détecté sur cette photo. Reprends la photo de plus près, bien éclairée et à plat.",
             quota,
           },
           { status: 422 }
