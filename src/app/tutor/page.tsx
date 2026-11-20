@@ -1,9 +1,14 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { MathText } from "@/components/MathText";
+
+interface PhotoHandoffContext {
+  fileName: string;
+  exerciseStatement: string;
+}
 
 type TutorMode = "guide" | "explain" | "quiz";
 
@@ -56,6 +61,8 @@ export default function StudentTutorPage() {
   const [loading, setLoading] = useState(false);
   const [quotaInfo, setQuotaInfo] = useState<{ remaining: number; limit: number } | null>(null);
   const [providerBadge, setProviderBadge] = useState<string | null>(null);
+  const [photoContext, setPhotoContext] = useState<PhotoHandoffContext | null>(null);
+  const [showPhotoText, setShowPhotoText] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -65,6 +72,51 @@ export default function StudentTutorPage() {
       suggestedFollowUp: QUICK_PROMPTS.ohm,
     },
   ]);
+
+  // Restore exact conversation when continuing from /photo ("Continuer cette discussion avec le Tuteur IA")
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem("spc_tutor_handoff");
+      if (!raw) return;
+      const handoff = JSON.parse(raw);
+      window.sessionStorage.removeItem("spc_tutor_handoff");
+      if (!handoff || !handoff.exerciseStatement) return;
+
+      setPhotoContext({
+        fileName: String(handoff.fileName || "photo_copie.jpg"),
+        exerciseStatement: String(handoff.exerciseStatement),
+      });
+
+      const assistantContent = [
+        handoff.summary ? `**Bilan :** ${handoff.summary}` : "",
+        handoff.tutorReply ? String(handoff.tutorReply) : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+
+      setMessages([
+        {
+          id: `photo-u-${Date.now()}`,
+          role: "user",
+          content: `📸 Photo envoyée (${handoff.fileName || "copie"}) :\n${handoff.studentQuestion || "Peux-tu m'aider sur cette photo ?"}`,
+        },
+        {
+          id: `photo-a-${Date.now() + 1}`,
+          role: "assistant",
+          content:
+            assistantContent ||
+            "J'ai bien chargé l'énoncé et ta copie depuis ta photo. Quelle question ou étape veux-tu approfondir ?",
+          suggestedFollowUp: [
+            "Explique-moi la première étape plus simplement",
+            "Vérifie ma proposition de calcul",
+            "Quelle formule dois-je utiliser pour la suite ?",
+          ],
+        },
+      ]);
+    } catch {
+      // ignore invalid session payload
+    }
+  }, []);
 
   const sendMessage = async (textOverride?: string) => {
     const content = (textOverride ?? input).trim();
@@ -82,7 +134,10 @@ export default function StudentTutorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: user?.id,
-          chapterTitle: `${selectedChapter.domain} — ${selectedChapter.title}`,
+          chapterTitle: photoContext
+            ? `Photo élève (${photoContext.fileName})`
+            : `${selectedChapter.domain} — ${selectedChapter.title}`,
+          exerciseStatement: photoContext?.exerciseStatement,
           mode,
           messages: nextHistory.map((m) => ({ role: m.role, content: m.content })),
         }),
@@ -113,6 +168,8 @@ export default function StudentTutorPage() {
   };
 
   const handleSelectChapter = (ch: typeof CHAPTERS[0]) => {
+    setPhotoContext(null);
+    setShowPhotoText(false);
     setSelectedChapter(ch);
     setMessages([
       {
@@ -219,7 +276,9 @@ export default function StudentTutorPage() {
         <section className="lg:col-span-8 bg-white rounded-3xl border border-slate-100 shadow-sm flex flex-col h-[76vh]">
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-extrabold text-slate-900">{selectedChapter.title}</div>
+              <div className="text-sm font-extrabold text-slate-900">
+                {photoContext ? `📸 Discussion sur ta photo (${photoContext.fileName})` : selectedChapter.title}
+              </div>
               <div className="text-xs text-slate-400">
                 Mode {mode === "guide" ? "Guidé (indices progressifs)" : mode === "explain" ? "Explication de cours" : "Quiz rapide"}
                 {providerBadge && (
@@ -229,19 +288,44 @@ export default function StudentTutorPage() {
                 )}
               </div>
             </div>
-            <Link
-              href={`/exercises/${selectedChapter.exerciseId}`}
-              className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3.5 py-2 rounded-xl hover:bg-indigo-100 whitespace-nowrap"
-            >
-              Pratiquer ce chapitre →
-            </Link>
+            {photoContext ? (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPhotoText((v) => !v)}
+                  className="text-xs font-bold bg-violet-50 text-violet-700 px-3 py-2 rounded-xl hover:bg-violet-100 whitespace-nowrap"
+                >
+                  {showPhotoText ? "Masquer l'énoncé" : "📄 Voir texte photo"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectChapter(selectedChapter)}
+                  className="text-xs font-semibold border border-slate-200 text-slate-600 px-3 py-2 rounded-xl hover:bg-slate-50 whitespace-nowrap"
+                >
+                  Nouvelle discussion
+                </button>
+              </div>
+            ) : (
+              <Link
+                href={`/exercises/${selectedChapter.exerciseId}`}
+                className="text-xs font-bold bg-indigo-50 text-indigo-700 px-3.5 py-2 rounded-xl hover:bg-indigo-100 whitespace-nowrap"
+              >
+                Pratiquer ce chapitre →
+              </Link>
+            )}
           </div>
+
+          {photoContext && showPhotoText && (
+            <div className="px-6 py-3 bg-violet-50/70 border-b border-violet-100 text-xs text-violet-950 max-h-36 overflow-y-auto whitespace-pre-line font-mono">
+              {photoContext.exerciseStatement}
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto p-6 space-y-4">
             {messages.map((msg) => (
               <div key={msg.id} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3.5 text-sm leading-relaxed ${
+                  className={`max-w-[85%] rounded-2xl px-4 py-3.5 text-sm leading-relaxed whitespace-pre-line ${
                     msg.role === "user"
                       ? "bg-indigo-600 text-white"
                       : "bg-slate-50 border border-slate-100 text-slate-800"

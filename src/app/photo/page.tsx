@@ -247,6 +247,38 @@ export default function PhotoSubmissionPage() {
     router.push("/auth/login");
   };
 
+  const continueInTutor = () => {
+    if (!analysis) {
+      router.push("/tutor");
+      return;
+    }
+    const transcribedText = lines
+      .filter((l) => l.text.trim())
+      .map((l, idx) => `Ligne ${idx + 1} : ${l.text}`)
+      .join("\n");
+
+    const handoff = {
+      fileName: fileName || "photo_copie.jpg",
+      mode: analysis.mode,
+      exerciseStatement: transcribedText,
+      studentQuestion:
+        studentQuestion.trim() ||
+        (analysis.mode === "question"
+          ? "Peux-tu m'aider à comprendre cet exercice ?"
+          : "Peux-tu m'expliquer la correction de ma copie ?"),
+      summary: analysis.summary,
+      tutorReply: analysis.tutorReply,
+      steps: analysis.steps,
+      createdAt: Date.now(),
+    };
+    try {
+      window.sessionStorage.setItem("spc_tutor_handoff", JSON.stringify(handoff));
+    } catch {
+      // ignore storage quota
+    }
+    router.push("/tutor?from=photo");
+  };
+
   const initials = user ? (user.firstName?.[0] ?? "E") + (user.lastName?.[0] ?? "") : "EL";
 
   return (
@@ -667,14 +699,13 @@ export default function PhotoSubmissionPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-3 pt-2">
-                  <Link
-                    href={analysis.mode === "question" ? "/tutor" : "/exercises"}
-                    className="flex-1 text-center bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 text-sm"
+                  <button
+                    type="button"
+                    onClick={continueInTutor}
+                    className="flex-1 text-center bg-indigo-600 text-white font-bold py-3 px-4 rounded-xl hover:bg-indigo-700 text-sm cursor-pointer"
                   >
-                    {analysis.mode === "question"
-                      ? "Continuer la discussion avec le Tuteur IA →"
-                      : "S'entraîner sur des exercices →"}
-                  </Link>
+                    💬 Continuer cette discussion avec le Tuteur IA →
+                  </button>
                   <button
                     onClick={resetAll}
                     className="px-5 py-3 rounded-xl border border-slate-200 text-sm font-semibold text-slate-700 hover:bg-slate-50"
