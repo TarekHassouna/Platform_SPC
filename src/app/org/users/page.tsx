@@ -31,6 +31,7 @@ function OrgUsersContent() {
   const { user: currentUser } = useAuth();
   const {
     users,
+    classes,
     loading,
     error,
     reloadAll,
@@ -39,6 +40,7 @@ function OrgUsersContent() {
     approveUser,
     rejectUser,
     deleteUser,
+    addStudentToClass,
   } = useOrgStore();
 
   const [roleFilter, setRoleFilter] = useState<string>(initialRole);
@@ -59,6 +61,7 @@ function OrgUsersContent() {
       ? initialRole
       : "student") as "student" | "teacher" | "parent" | "org_admin",
     level: "Terminale",
+    classId: "",
   });
 
   // Edit modal state
@@ -113,6 +116,7 @@ function OrgUsersContent() {
       password: createForm.password,
       role: createForm.role,
       level: createForm.role === "student" ? createForm.level : undefined,
+      classId: createForm.role === "student" ? createForm.classId || undefined : undefined,
     });
     setCreating(false);
     if (!res.ok) {
@@ -131,6 +135,7 @@ function OrgUsersContent() {
       password: "",
       role: "student",
       level: "Terminale",
+      classId: "",
     });
     setShowCreate(false);
   };
@@ -325,18 +330,39 @@ function OrgUsersContent() {
               />
             </div>
             {createForm.role === "student" && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Niveau</label>
-                <select
-                  value={createForm.level}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, level: e.target.value }))}
-                  className={inputCls}
-                >
-                  <option value="Seconde">Seconde</option>
-                  <option value="Première">Première</option>
-                  <option value="Terminale">Terminale</option>
-                </select>
-              </div>
+              <>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Niveau</label>
+                  <select
+                    value={createForm.level}
+                    onChange={(e) => setCreateForm((f) => ({ ...f, level: e.target.value }))}
+                    className={inputCls}
+                  >
+                    <option value="Seconde">Seconde</option>
+                    <option value="Première">Première</option>
+                    <option value="Terminale">Terminale</option>
+                  </select>
+                </div>
+                {classes.length > 0 && (
+                  <div className="sm:col-span-2 lg:col-span-3">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Affecter à une classe <span className="text-slate-400 font-normal">(optionnel)</span>
+                    </label>
+                    <select
+                      value={createForm.classId}
+                      onChange={(e) => setCreateForm((f) => ({ ...f, classId: e.target.value }))}
+                      className={inputCls}
+                    >
+                      <option value="">Ne pas affecter maintenant</option>
+                      {classes.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          🏫 {c.name} ({c.level}) · Code : {c.inviteCode}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </>
             )}
           </div>
           <div className="flex items-center gap-3">
@@ -438,6 +464,14 @@ function OrgUsersContent() {
               const statusMeta = STATUS_META[u.accountStatus] || STATUS_META.approved;
               const isSelf = currentUser?.id === u.id;
               const fullName = `${u.firstName} ${u.lastName}`.trim() || u.email;
+              const studentClasses =
+                u.role === "student"
+                  ? classes.filter((c) => c.students.some((s) => s.id === u.id))
+                  : [];
+              const otherClasses =
+                u.role === "student"
+                  ? classes.filter((c) => !c.students.some((s) => s.id === u.id))
+                  : [];
               return (
                 <div
                   key={u.id}
@@ -468,6 +502,14 @@ function OrgUsersContent() {
                         <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${statusMeta.cls}`}>
                           {statusMeta.label}
                         </span>
+                        {studentClasses.map((sc) => (
+                          <span
+                            key={sc.id}
+                            className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full"
+                          >
+                            🏫 {sc.name}
+                          </span>
+                        ))}
                       </div>
                       <div className="text-xs text-slate-400 truncate mt-0.5">
                         {u.email} · Inscrit le {new Date(u.createdAt).toLocaleDateString("fr-FR")}
@@ -477,6 +519,34 @@ function OrgUsersContent() {
 
                   {/* CRUD Action Buttons */}
                   <div className="flex items-center gap-2 flex-wrap shrink-0">
+                    {u.role === "student" && otherClasses.length > 0 && (
+                      <select
+                        defaultValue=""
+                        disabled={busyId === u.id}
+                        onChange={async (e) => {
+                          const cid = e.target.value;
+                          if (!cid) return;
+                          e.target.value = "";
+                          setBusyId(u.id);
+                          const res = await addStudentToClass(cid, u.id);
+                          setBusyId(null);
+                          if (!res.ok) {
+                            showToast(`⚠️ ${res.error || "Erreur"}`);
+                          } else {
+                            const clsName = otherClasses.find((c) => c.id === cid)?.name;
+                            showToast(`✅ ${fullName} ajouté(e) à ${clsName || "la classe"} !`);
+                          }
+                        }}
+                        className="border border-indigo-200 bg-indigo-50/50 text-indigo-700 text-xs font-bold px-2.5 py-1.5 rounded-xl outline-none hover:border-indigo-400 cursor-pointer"
+                      >
+                        <option value="">+ Classe…</option>
+                        {otherClasses.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.inviteCode})
+                          </option>
+                        ))}
+                      </select>
+                    )}
                     {u.accountStatus !== "approved" && (
                       <button
                         type="button"

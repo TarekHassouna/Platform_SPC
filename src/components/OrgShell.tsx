@@ -11,6 +11,7 @@ export function OrgShell({ children }: { children: ReactNode }) {
     orgName,
     users,
     parentLinks,
+    classes,
     pendingUsersCount,
     pendingLinksCount,
   } = useOrgStore();
@@ -56,6 +57,13 @@ export function OrgShell({ children }: { children: ReactNode }) {
       href: "/org/users",
       badge: String(users.length),
       urgent: pendingUsersCount > 0,
+    },
+    {
+      icon: "🏫",
+      label: "Classes & Codes",
+      href: "/org/classes",
+      badge: String(classes.length),
+      urgent: false,
     },
     {
       icon: "👨‍👩‍👧",

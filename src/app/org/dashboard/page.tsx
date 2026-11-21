@@ -20,6 +20,7 @@ export default function OrgDashboardPage() {
     orgInviteCode,
     users,
     parentLinks,
+    classes,
     loading,
     error,
     pendingUsersCount,
@@ -327,7 +328,19 @@ export default function OrgDashboardPage() {
       </div>
 
       {/* Quick navigation cards */}
-      <div className="grid sm:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Link
+          href="/org/classes"
+          className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:border-indigo-300 transition-all"
+        >
+          <div className="text-xl mb-1.5">🏫</div>
+          <div className="font-bold text-slate-900 text-sm">
+            Classes &amp; Codes ({classes.length})
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            Voir tous les codes de classes et affecter un élève dans une classe
+          </div>
+        </Link>
         <Link
           href="/org/users?role=student"
           className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm hover:border-indigo-300 transition-all"

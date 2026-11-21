@@ -1271,3 +1271,145 @@ export async function adminCreateParentLink(
   if (data && !data.ok) return { ok: false, error: data.error || "Impossible de créer la liaison." };
   return { ok: true };
 }
+
+// =============================================================================
+// ADMIN CLASSES, CLASS CODES & STUDENT ENROLLMENT RPCs
+// =============================================================================
+
+export interface AdminClassStudent {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  level: string | null;
+  joinedAt: string;
+}
+
+export interface AdminClassRecord {
+  id: string;
+  name: string;
+  level: string;
+  inviteCode: string;
+  color: string;
+  teacherId: string;
+  teacherName: string;
+  teacherEmail: string;
+  createdAt: string;
+  students: AdminClassStudent[];
+}
+
+export async function fetchAdminClasses(): Promise<{
+  classes: AdminClassRecord[];
+  error?: string;
+}> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { classes: [], error: "Connexion à la base indisponible." };
+  }
+
+  const { data, error } = await supabase.rpc("admin_list_all_classes");
+  if (error) {
+    // Gracefully return empty if admin_classes.sql hasn't been executed yet
+    if (error.message.includes("admin_list_all_classes")) {
+      return { classes: [] };
+    }
+    return { classes: [], error: error.message };
+  }
+
+  const classes: AdminClassRecord[] = (Array.isArray(data) ? data : []).map(
+    (r: Record<string, unknown>) => {
+      const rawStudents = Array.isArray(r.students)
+        ? (r.students as Record<string, unknown>[])
+        : [];
+      return {
+        id: String(r.id),
+        name: String(r.name || "Classe"),
+        level: String(r.level || "Terminale"),
+        inviteCode: String(r.invite_code || ""),
+        color: String(r.color || "from-indigo-500 to-violet-600"),
+        teacherId: String(r.teacher_id || ""),
+        teacherName: String(r.teacher_name || "Enseignant"),
+        teacherEmail: String(r.teacher_email || ""),
+        createdAt: String(r.created_at || new Date().toISOString()),
+        students: rawStudents.map((s) => ({
+          id: String(s.id),
+          firstName: String(s.firstName || ""),
+          lastName: String(s.lastName || ""),
+          email: String(s.email || ""),
+          level: s.level ? String(s.level) : null,
+          joinedAt: String(s.joinedAt || ""),
+        })),
+      };
+    }
+  );
+
+  return { classes };
+}
+
+export async function adminAddStudentToClass(
+  classId: string,
+  studentId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+  const { data, error } = await supabase.rpc("admin_add_student_to_class", {
+    p_class_id: classId,
+    p_student_id: studentId,
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Impossible d'ajouter cet élève." };
+  return { ok: true };
+}
+
+export async function adminRemoveStudentFromClass(
+  classId: string,
+  studentId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+  const { data, error } = await supabase.rpc("admin_remove_student_from_class", {
+    p_class_id: classId,
+    p_student_id: studentId,
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Impossible de retirer cet élève." };
+  return { ok: true };
+}
+
+export async function adminCreateClass(params: {
+  name: string;
+  level: string;
+  teacherId: string;
+  inviteCode?: string;
+}): Promise<{ ok: boolean; inviteCode?: string; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+  const { data, error } = await supabase.rpc("admin_create_class", {
+    p_name: params.name.trim(),
+    p_level: params.level,
+    p_teacher_id: params.teacherId,
+    p_invite_code: params.inviteCode?.trim() || null,
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Impossible de créer la classe." };
+  return { ok: true, inviteCode: data?.invite_code ? String(data.invite_code) : undefined };
+}
+
+export async function adminDeleteClass(classId: string): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+  const { data, error } = await supabase.rpc("admin_delete_class", {
+    p_class_id: classId,
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Impossible de supprimer la classe." };
+  return { ok: true };
+}

@@ -9,8 +9,14 @@ import {
   fetchAdminParentLinks,
   adminReviewParentLink,
   adminCreateParentLink,
+  fetchAdminClasses,
+  adminCreateClass,
+  adminDeleteClass,
+  adminAddStudentToClass,
+  adminRemoveStudentFromClass,
   type AdminUserRecord,
   type AdminParentLinkRecord,
+  type AdminClassRecord,
 } from "@/lib/db";
 
 interface OrgStoreContextType {
@@ -18,6 +24,7 @@ interface OrgStoreContextType {
   orgInviteCode: string;
   users: AdminUserRecord[];
   parentLinks: AdminParentLinkRecord[];
+  classes: AdminClassRecord[];
   loading: boolean;
   error: string | null;
   pendingUsersCount: number;
@@ -33,7 +40,8 @@ interface OrgStoreContextType {
     password: string;
     role: "student" | "teacher" | "parent" | "org_admin";
     level?: string;
-  }) => Promise<{ ok: boolean; error?: string; warning?: string }>;
+    classId?: string;
+  }) => Promise<{ ok: boolean; userId?: string; error?: string; warning?: string }>;
   updateUser: (params: {
     userId: string;
     firstName?: string;
@@ -53,6 +61,21 @@ interface OrgStoreContextType {
     parentId: string,
     studentId: string
   ) => Promise<{ ok: boolean; error?: string }>;
+  createClass: (params: {
+    name: string;
+    level: string;
+    teacherId: string;
+    inviteCode?: string;
+  }) => Promise<{ ok: boolean; inviteCode?: string; error?: string }>;
+  deleteClass: (classId: string) => Promise<{ ok: boolean; error?: string }>;
+  addStudentToClass: (
+    classId: string,
+    studentId: string
+  ) => Promise<{ ok: boolean; error?: string }>;
+  removeStudentFromClass: (
+    classId: string,
+    studentId: string
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 const OrgStoreContext = createContext<OrgStoreContextType | null>(null);
@@ -63,6 +86,7 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
   const [orgInviteCode, setOrgInviteCode] = useState("");
   const [users, setUsers] = useState<AdminUserRecord[]>([]);
   const [parentLinks, setParentLinks] = useState<AdminParentLinkRecord[]>([]);
+  const [classes, setClasses] = useState<AdminClassRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,19 +108,23 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
 
     setLoading(true);
     setError(null);
-    const [usersRes, linksRes] = await Promise.all([
+    const [usersRes, linksRes, classesRes] = await Promise.all([
       fetchAdminUsers(),
       fetchAdminParentLinks(),
+      fetchAdminClasses(),
     ]);
 
     if (usersRes.error) {
       setError(usersRes.error);
     } else if (linksRes.error) {
       setError(linksRes.error);
+    } else if (classesRes.error) {
+      setError(classesRes.error);
     }
 
     setUsers(usersRes.users);
     setParentLinks(linksRes.links);
+    setClasses(classesRes.classes);
     setLoading(false);
   }, [user, memberships]);
 
@@ -105,8 +133,14 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
   }, [reloadAll]);
 
   const createUser: OrgStoreContextType["createUser"] = async (params) => {
-    const res = await adminCreateUser(params);
-    if (res.ok) await reloadAll();
+    const { classId, ...rest } = params;
+    const res = await adminCreateUser(rest);
+    if (res.ok) {
+      if (classId && res.userId && params.role === "student") {
+        await adminAddStudentToClass(classId, res.userId);
+      }
+      await reloadAll();
+    }
     return res;
   };
 
@@ -143,6 +177,12 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
       setParentLinks((prev) =>
         prev.filter((l) => l.parentId !== userId && l.studentId !== userId)
       );
+      setClasses((prev) =>
+        prev.map((c) => ({
+          ...c,
+          students: c.students.filter((s) => s.id !== userId),
+        }))
+      );
     }
     return res;
   };
@@ -162,6 +202,46 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
     return res;
   };
 
+  const createClass: OrgStoreContextType["createClass"] = async (params) => {
+    const res = await adminCreateClass(params);
+    if (res.ok) await reloadAll();
+    return res;
+  };
+
+  const deleteClass: OrgStoreContextType["deleteClass"] = async (classId) => {
+    const res = await adminDeleteClass(classId);
+    if (res.ok) {
+      setClasses((prev) => prev.filter((c) => c.id !== classId));
+    }
+    return res;
+  };
+
+  const addStudentToClass: OrgStoreContextType["addStudentToClass"] = async (
+    classId,
+    studentId
+  ) => {
+    const res = await adminAddStudentToClass(classId, studentId);
+    if (res.ok) await reloadAll();
+    return res;
+  };
+
+  const removeStudentFromClass: OrgStoreContextType["removeStudentFromClass"] = async (
+    classId,
+    studentId
+  ) => {
+    const res = await adminRemoveStudentFromClass(classId, studentId);
+    if (res.ok) {
+      setClasses((prev) =>
+        prev.map((c) =>
+          c.id === classId
+            ? { ...c, students: c.students.filter((s) => s.id !== studentId) }
+            : c
+        )
+      );
+    }
+    return res;
+  };
+
   const pendingUsersCount = users.filter((u) => u.accountStatus === "pending").length;
   const pendingLinksCount = parentLinks.filter(
     (l) => l.status === "pending_admin" || l.status === "pending"
@@ -177,6 +257,7 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
         orgInviteCode,
         users,
         parentLinks,
+        classes,
         loading,
         error,
         pendingUsersCount,
@@ -192,6 +273,10 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
         deleteUser,
         reviewParentLink,
         createParentLink,
+        createClass,
+        deleteClass,
+        addStudentToClass,
+        removeStudentFromClass,
       }}
     >
       {children}
