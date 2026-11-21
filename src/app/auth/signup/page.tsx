@@ -7,8 +7,8 @@ import { useAuth, UserRole, getDashboardPathForRole } from "@/lib/auth-context";
 const roles = [
   { label: "Élève", icon: "🎓", value: "student" as UserRole, hint: "Seconde à Terminale" },
   { label: "Enseignant", icon: "👨‍🏫", value: "teacher" as UserRole, hint: "Professeur ou tuteur" },
-  { label: "Parent", icon: "👪", value: "parent" as UserRole, hint: "Suivi & abonnement" },
-  { label: "Établissement", icon: "🏛️", value: "org_admin" as UserRole, hint: "Direction & sièges" },
+  { label: "Parent", icon: "👪", value: "parent" as UserRole, hint: "Suivi pédagogique" },
+  { label: "Administrateur", icon: "🏛️", value: "org_admin" as UserRole, hint: "Direction & validations" },
 ];
 
 const inputClass =
@@ -168,12 +168,12 @@ export default function SignupPage() {
 
   const ctaLabel =
     role === "parent"
-      ? "Créer mon compte & lier mon enfant →"
+      ? "Envoyer ma demande parent →"
       : role === "teacher"
-      ? "Créer mon espace enseignant →"
+      ? "Envoyer ma demande enseignant →"
       : role === "org_admin"
-      ? "Créer l'espace établissement →"
-      : "Créer mon compte élève →";
+      ? "Créer l'espace administrateur →"
+      : "Envoyer ma demande élève →";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-violet-50 flex items-center justify-center p-6">
@@ -233,7 +233,7 @@ export default function SignupPage() {
                 <input
                   type="text"
                   required
-                  placeholder="Amira"
+                  placeholder="Prénom"
                   className={inputClass}
                   value={form.firstName}
                   onChange={(e) => set("firstName", e.target.value)}
@@ -244,7 +244,7 @@ export default function SignupPage() {
                 <input
                   type="text"
                   required
-                  placeholder="Benali"
+                  placeholder="Nom"
                   className={inputClass}
                   value={form.lastName}
                   onChange={(e) => set("lastName", e.target.value)}
@@ -330,7 +330,7 @@ export default function SignupPage() {
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1.5">
                   E-mail du compte élève de votre enfant{" "}
-                  <span className="text-slate-400 font-normal">(optionnel — liaison instantanée)</span>
+                  <span className="text-slate-400 font-normal">(optionnel — soumis à validation admin)</span>
                 </label>
                 <input
                   type="email"
@@ -340,34 +340,28 @@ export default function SignupPage() {
                   onChange={(e) => set("childEmail", e.target.value)}
                 />
                 <p className="text-[11px] text-slate-400 mt-1">
-                  Vous pourrez aussi ajouter ou rattacher vos enfants par e-mail à tout moment après connexion.
+                  La liaison avec un élève nécessite l&apos;accord de l&apos;administrateur. Vous pourrez aussi demander un rattachement après validation de votre compte.
                 </p>
               </div>
             )}
 
             {/* ORG ADMIN relational fields */}
             {role === "org_admin" && (
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Nom de l&apos;établissement *</label>
-                  <input
-                    type="text"
-                    placeholder="Lycée Français du Caire"
-                    className={inputClass}
-                    value={form.school}
-                    onChange={(e) => set("school", e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">Volume de sièges</label>
-                  <select className={selectClass} value={form.orgSeats} onChange={(e) => set("orgSeats", e.target.value)}>
-                    <option value="25">1–29 élèves (7 €/él.)</option>
-                    <option value="50">30–59 élèves (6 €/él.)</option>
-                    <option value="80">60–149 élèves (5 €/él.)</option>
-                    <option value="200">150–299 élèves (4 €/él.)</option>
-                    <option value="350">300+ élèves (Devis)</option>
-                  </select>
-                </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Nom de l&apos;établissement *</label>
+                <input
+                  type="text"
+                  placeholder="Mon établissement scolaire"
+                  className={inputClass}
+                  value={form.school}
+                  onChange={(e) => set("school", e.target.value)}
+                />
+              </div>
+            )}
+
+            {role !== "org_admin" && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-3.5 py-2.5 text-xs text-amber-800">
+                ⏳ <strong>Validation requise :</strong> votre demande de compte sera envoyée à l&apos;administrateur. Votre accès s&apos;ouvrira dès son acceptation.
               </div>
             )}
 

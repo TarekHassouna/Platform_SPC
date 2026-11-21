@@ -7,7 +7,13 @@ import { useOrgStore } from "@/lib/org-store";
 
 export function OrgShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
-  const { orgName, seatsPurchased, seats, teachers } = useOrgStore();
+  const {
+    orgName,
+    users,
+    parentLinks,
+    pendingUsersCount,
+    pendingLinksCount,
+  } = useOrgStore();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -25,15 +31,37 @@ export function OrgShell({ children }: { children: ReactNode }) {
     router.push("/auth/login");
   };
 
-  const displayName = user ? `${user.firstName} ${user.lastName}`.trim() : "Admin Établissement";
+  const displayName = user ? `${user.firstName} ${user.lastName}`.trim() : "Administrateur";
   const initials = user ? (user.firstName?.[0] ?? "A") + (user.lastName?.[0] ?? "") : "AD";
   const schoolTitle = user?.school || orgName;
+  const totalPending = pendingUsersCount + pendingLinksCount;
+  const linkedCount = parentLinks.filter((l) => l.status === "linked").length;
 
   const navItems = [
-    { icon: "🏛️", label: "Vue établissement", href: "/org/dashboard" },
-    { icon: "👨‍🏫", label: "Enseignants & classes", href: "/org/teachers", badge: String(teachers.length) },
-    { icon: "🎟️", label: "Sièges élèves", href: "/org/seats", badge: `${seats.length}/${seatsPurchased}` },
-    { icon: "💳", label: "Facturation & RGPD", href: "/org/billing" },
+    {
+      icon: "🏛️",
+      label: "Vue d'ensemble",
+      href: "/org/dashboard",
+      badge: totalPending > 0 ? `${totalPending} à valider` : undefined,
+      urgent: totalPending > 0,
+    },
+    {
+      icon: "👥",
+      label: "Utilisateurs (CRUD)",
+      href: "/org/users",
+      badge: String(users.length),
+      urgent: pendingUsersCount > 0,
+    },
+    {
+      icon: "👨‍👩‍👧",
+      label: "Liaisons Parent-Élève",
+      href: "/org/links",
+      badge:
+        pendingLinksCount > 0
+          ? `${pendingLinksCount} en attente`
+          : String(linkedCount),
+      urgent: pendingLinksCount > 0,
+    },
   ];
 
   const SidebarContent = (
@@ -44,9 +72,11 @@ export function OrgShell({ children }: { children: ReactNode }) {
             S
           </div>
           <div className="min-w-0">
-            <span className="font-bold text-slate-900 block leading-tight truncate">{schoolTitle}</span>
+            <span className="font-bold text-slate-900 block leading-tight truncate">
+              {schoolTitle}
+            </span>
             <span className="text-[11px] font-semibold text-violet-700 bg-violet-50 px-2 py-0.5 rounded-full">
-              Admin Établissement
+              Administrateur
             </span>
           </div>
         </div>
@@ -69,7 +99,13 @@ export function OrgShell({ children }: { children: ReactNode }) {
               <span className="text-base">{item.icon}</span>
               <span className="flex-1 truncate">{item.label}</span>
               {item.badge && (
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                <span
+                  className={`text-[11px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap ${
+                    item.urgent
+                      ? "bg-amber-100 text-amber-800"
+                      : "bg-slate-100 text-slate-600"
+                  }`}
+                >
                   {item.badge}
                 </span>
               )}
@@ -85,7 +121,7 @@ export function OrgShell({ children }: { children: ReactNode }) {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-slate-900 truncate">{displayName}</p>
-            <p className="text-xs text-slate-400">Licence Établissement</p>
+            <p className="text-xs text-slate-400">Espace Administration</p>
           </div>
         </div>
         <button

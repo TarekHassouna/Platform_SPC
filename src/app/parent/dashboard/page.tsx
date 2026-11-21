@@ -119,8 +119,8 @@ export default function ParentDashboard() {
     setLinkMsg({
       ok: true,
       text: res.linked
-        ? `✅ Compte de ${res.childName || linkEmail} lié instantanément !`
-        : `⏳ Invitation enregistrée pour ${linkEmail} : le lien s'activera dès que votre enfant créera son compte élève avec cet e-mail.`,
+        ? `✅ Le compte de ${res.childName || linkEmail} est déjà lié et validé.`
+        : `⏳ Demande de liaison envoyée à l'administrateur pour ${linkEmail}. Vous aurez accès aux résultats dès sa validation.`,
     });
     setLinkEmail("");
     setLinkName("");
@@ -200,10 +200,10 @@ export default function ParentDashboard() {
         >
           <div>
             <h2 className="font-extrabold text-slate-900 text-base">
-              🔗 Rattacher un compte élève par adresse e-mail
+              🔗 Demander le rattachement d&apos;un élève
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Entrez l&apos;adresse e-mail utilisée par votre enfant sur la plateforme : s&apos;il a déjà un compte, la liaison est <strong>instantanée</strong> ; sinon, elle s&apos;activera automatiquement dès son inscription.
+              Indiquez l&apos;adresse e-mail du compte élève de votre enfant : votre demande sera transmise à <strong>l&apos;administrateur</strong> pour validation avant l&apos;ouverture de l&apos;accès.
             </p>
           </div>
           <div className="grid sm:grid-cols-3 gap-3">
@@ -251,7 +251,7 @@ export default function ParentDashboard() {
               disabled={linking}
               className="bg-indigo-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-60"
             >
-              {linking ? "⏳ Liaison en cours…" : "🔗 Rattacher cet enfant"}
+              {linking ? "⏳ Envoi en cours…" : "📩 Demander la liaison à l'admin"}
             </button>
           </div>
         </form>
@@ -295,52 +295,83 @@ export default function ParentDashboard() {
                   className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                     activeChild.linked
                       ? "bg-emerald-400/25 text-emerald-100"
+                      : activeChild.status === "rejected"
+                      ? "bg-rose-400/30 text-rose-100"
                       : "bg-amber-400/25 text-amber-100"
                   }`}
                 >
-                  {activeChild.linked ? "● Compte élève lié" : "⏳ En attente d'inscription élève"}
+                  {activeChild.linked
+                    ? "● Liaison validée"
+                    : activeChild.status === "rejected"
+                    ? "❌ Demande refusée par l'admin"
+                    : "⏳ En attente de validation admin"}
                 </span>
               </div>
               <div className="text-indigo-200 text-sm mt-0.5 flex flex-wrap gap-2 items-center">
                 <span>{activeChild.childLevel} · Physique-Chimie</span>
                 {activeChild.childEmail && <span>· {activeChild.childEmail}</span>}
-                {activeChild.enrolledClasses.length > 0 && (
+                {activeChild.linked && activeChild.enrolledClasses.length > 0 && (
                   <span className="bg-white/15 text-white text-xs font-semibold px-2.5 py-0.5 rounded-full">
                     🏫 {activeChild.enrolledClasses.map((c) => c.name).join(", ")}
                   </span>
                 )}
               </div>
-              <div className="mt-3 flex items-center gap-2.5 flex-wrap">
-                <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">
-                  📝 {subCount} exercice(s) soumis
-                </span>
-                <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">
-                  ✅ {acquiredCount} / {realSkills.length} acquis
-                </span>
-                <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">
-                  🎯 {subCount > 0 ? `${avgPrecision}% de réussite` : "En attente d'activité"}
-                </span>
-                {activeChild.assignments.length > 0 && (
+              {activeChild.linked && (
+                <div className="mt-3 flex items-center gap-2.5 flex-wrap">
                   <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">
-                    📌 {todoAssignments.length} devoir(s) restant(s)
+                    📝 {subCount} exercice(s) soumis
                   </span>
-                )}
-              </div>
+                  <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">
+                    ✅ {acquiredCount} / {realSkills.length} acquis
+                  </span>
+                  <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">
+                    🎯 {subCount > 0 ? `${avgPrecision}% de réussite` : "En attente d'activité"}
+                  </span>
+                  {activeChild.assignments.length > 0 && (
+                    <span className="bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full">
+                      📌 {todoAssignments.length} devoir(s) restant(s)
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
           {!activeChild.linked && (
-            <div className="mb-7 bg-amber-50 border border-amber-200 rounded-2xl p-5 text-sm text-amber-900 space-y-2">
-              <div>
-                <strong>En attente de liaison :</strong> aucun compte élève n&apos;a encore été trouvé avec l&apos;adresse{" "}
-                <code className="font-mono bg-white px-1.5 py-0.5 rounded">
-                  {activeChild.childEmail || "non renseignée"}
-                </code>
-                .
-              </div>
-              <p className="text-xs text-amber-800">
-                Dès que votre enfant crée son compte <strong>Élève</strong> avec cette adresse e-mail (ou si vous cliquez sur <strong>« + Rattacher un enfant »</strong> avec son vrai e-mail déjà inscrit), ses résultats apparaîtront ici instantanément.
-              </p>
+            <div
+              className={`mb-7 rounded-2xl p-5 text-sm space-y-2 border ${
+                activeChild.status === "rejected"
+                  ? "bg-rose-50 border-rose-200 text-rose-900"
+                  : "bg-amber-50 border-amber-200 text-amber-900"
+              }`}
+            >
+              {activeChild.status === "rejected" ? (
+                <>
+                  <div>
+                    <strong>❌ Liaison refusée par l&apos;administrateur :</strong> la demande pour{" "}
+                    <code className="font-mono bg-white px-1.5 py-0.5 rounded">
+                      {activeChild.childEmail || "non renseignée"}
+                    </code>{" "}
+                    n&apos;a pas été approuvée.
+                  </div>
+                  <p className="text-xs text-rose-800">
+                    Vérifiez l&apos;adresse e-mail de votre enfant ou contactez l&apos;administration de l&apos;établissement.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <strong>⏳ En attente de validation par l&apos;administrateur :</strong> votre demande de liaison avec{" "}
+                    <code className="font-mono bg-white px-1.5 py-0.5 rounded">
+                      {activeChild.childEmail || "non renseignée"}
+                    </code>{" "}
+                    a bien été enregistrée.
+                  </div>
+                  <p className="text-xs text-amber-800">
+                    Pour la sécurité des élèves, aucun résultat n&apos;est affiché tant que l&apos;administrateur n&apos;a pas vérifié et accepté cette liaison. Cliquez sur <strong>« 🔄 Actualiser »</strong> après validation.
+                  </p>
+                </>
+              )}
             </div>
           )}
 
@@ -427,7 +458,8 @@ export default function ParentDashboard() {
             </div>
           )}
 
-          {/* Mastery + Recent Submissions */}
+          {/* Mastery + Recent Submissions (only visible once approved by Admin) */}
+          {activeChild.linked && (
           <div className="grid lg:grid-cols-2 gap-6 mb-7">
             {/* Real Mastery */}
             <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-sm">
@@ -516,6 +548,7 @@ export default function ParentDashboard() {
               )}
             </div>
           </div>
+          )}
         </>
       ) : null}
 

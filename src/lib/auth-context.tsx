@@ -8,6 +8,7 @@ import {
 } from "@/lib/db";
 
 export type UserRole = "student" | "teacher" | "parent" | "org_admin";
+export type AccountStatus = "pending" | "approved" | "rejected";
 
 export interface UserProfile {
   id?: string;
@@ -15,13 +16,14 @@ export interface UserProfile {
   lastName: string;
   email: string;
   role: UserRole;
+  accountStatus?: AccountStatus;
   level?: string;         // student
   classCode?: string;     // student
   school?: string;        // teacher / org_admin
   levels?: string[];      // teacher
   schoolCode?: string;    // teacher
   childName?: string;     // parent
-  childEmail?: string;    // parent (for relational auto-linking)
+  childEmail?: string;    // parent (for relational linking)
   childLevel?: string;    // parent
   orgSeats?: number;      // org_admin
 }
@@ -52,6 +54,7 @@ interface AuthContextType {
   sendPasswordReset: (email: string) => Promise<AuthActionResult>;
   updatePassword: (newPassword: string) => Promise<AuthActionResult>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
+  refreshProfile: () => Promise<UserProfile | null>;
   logout: () => Promise<void>;
 }
 
@@ -66,6 +69,7 @@ const AuthContext = createContext<AuthContextType>({
   sendPasswordReset: async () => ({ ok: false, mode: "local" }),
   updatePassword: async () => ({ ok: false, mode: "local" }),
   updateProfile: async () => {},
+  refreshProfile: async () => null,
   logout: async () => {},
 });
 
@@ -227,12 +231,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      const savedProfile: UserProfile = { ...profile, id: data.user!.id };
+      const savedProfile: UserProfile = {
+        ...profile,
+        id: data.user!.id,
+        accountStatus: profile.role === "org_admin" ? "approved" : "pending",
+      };
       const { warnings } = await completeRelationalOnboarding(data.user!.id, savedProfile);
-      const { memberships: mems } = await fetchRelationalProfile(data.user!.id);
-      setUser(savedProfile);
+      const { profile: dbProfile, memberships: mems } = await fetchRelationalProfile(data.user!.id);
+      const finalProfile: UserProfile = dbProfile
+        ? { ...savedProfile, ...dbProfile }
+        : savedProfile;
+      setUser(finalProfile);
       setMemberships(mems);
-      return { ok: true, profile: savedProfile, warnings, mode: "supabase" };
+      return { ok: true, profile: finalProfile, warnings, mode: "supabase" };
     }
 
     // Local registry mode (real validation + relational profile storage)
@@ -390,6 +401,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshProfile = async (): Promise<UserProfile | null> => {
+    const supabase = getSupabaseBrowserClient();
+    if (!isSupabaseConfigured || !supabase) return user;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.user) {
+      setUser(null);
+      setMemberships([]);
+      return null;
+    }
+    const { profile, memberships: mems } = await fetchRelationalProfile(session.user.id);
+    if (profile) {
+      setUser(profile);
+      setMemberships(mems);
+      return profile;
+    }
+    return user;
+  };
+
   const logout = async () => {
     const supabase = getSupabaseBrowserClient();
     if (isSupabaseConfigured && supabase) {
@@ -413,6 +444,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sendPasswordReset,
         updatePassword,
         updateProfile,
+        refreshProfile,
         logout,
       }}
     >

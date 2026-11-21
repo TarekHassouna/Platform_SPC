@@ -1,5 +1,9 @@
-import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
-import type { UserProfile, UserRole } from "@/lib/auth-context";
+import {
+  createEphemeralSupabaseClient,
+  getSupabaseBrowserClient,
+  isSupabaseConfigured,
+} from "@/lib/supabase/client";
+import type { AccountStatus, UserProfile, UserRole } from "@/lib/auth-context";
 
 export interface MembershipRecord {
   id: string;
@@ -113,7 +117,7 @@ export async function fetchRelationalProfile(userId: string): Promise<{
   const [{ data: row }, { data: memRows }, { data: childLink }] = await Promise.all([
     supabase
       .from("profiles")
-      .select("id, email, first_name, last_name, default_role, level")
+      .select("*")
       .eq("id", userId)
       .maybeSingle(),
     supabase
@@ -143,13 +147,24 @@ export async function fetchRelationalProfile(userId: string): Promise<{
   }
 
   const primaryOrg = memberships[0]?.organization;
+  const rawRole = String(row.default_role || "student");
+  const normalizedRole: UserRole =
+    rawRole === "platform_admin" || rawRole === "org_admin"
+      ? "org_admin"
+      : rawRole === "teacher" || rawRole === "parent"
+      ? (rawRole as UserRole)
+      : "student";
+  const rawStatus = String((row as Record<string, unknown>).account_status || "approved");
+  const accountStatus: AccountStatus =
+    rawStatus === "pending" || rawStatus === "rejected" ? rawStatus : "approved";
 
   const profile: UserProfile = {
     id: row.id,
     email: row.email,
     firstName: row.first_name,
     lastName: row.last_name || "",
-    role: (row.default_role as UserRole) || "student",
+    role: normalizedRole,
+    accountStatus,
     level: row.level || undefined,
     school: primaryOrg?.name,
     orgSeats: primaryOrg?.seats_purchased,
@@ -574,6 +589,7 @@ export async function recordExerciseSubmission(params: {
 export interface ParentChildSnapshot {
   linkId: string;
   linked: boolean;
+  status: "pending_admin" | "pending" | "linked" | "rejected" | "revoked";
   studentId?: string;
   childName: string;
   childLevel: string;
@@ -585,8 +601,8 @@ export interface ParentChildSnapshot {
 }
 
 /**
- * Links the currently logged-in parent to a student account by email.
- * Instant link if the student already exists; creates a pending auto-link if they sign up later.
+ * Submits a Parent -> Student link request by student email.
+ * The request stays in 'pending_admin' until an Administrator approves it.
  */
 export async function linkParentToChild(params: {
   childEmail: string;
@@ -595,6 +611,8 @@ export async function linkParentToChild(params: {
 }): Promise<{
   ok: boolean;
   linked?: boolean;
+  status?: string;
+  studentFound?: boolean;
   childName?: string;
   error?: string;
 }> {
@@ -614,23 +632,18 @@ export async function linkParentToChild(params: {
   });
 
   if (error) {
-    if (error.message.includes("link_parent_to_child_by_email")) {
-      return {
-        ok: false,
-        error:
-          "Fonction de liaison non activée : exécutez supabase/parent_link.sql dans Supabase SQL Editor.",
-      };
-    }
     return { ok: false, error: error.message };
   }
 
   if (data && !data.ok) {
-    return { ok: false, error: data.error || "Impossible de rattacher cet enfant." };
+    return { ok: false, error: data.error || "Impossible d'envoyer la demande de liaison." };
   }
 
   return {
     ok: true,
     linked: Boolean(data?.linked),
+    status: data?.status ? String(data.status) : data?.linked ? "linked" : "pending_admin",
+    studentFound: Boolean(data?.student_found),
     childName: data?.child_name ? String(data.child_name) : params.childName,
   };
 }
@@ -646,7 +659,8 @@ export async function unlinkParentChild(linkId: string): Promise<boolean> {
 }
 
 /**
- * Fetches ALL linked & pending children + their full real progress (classes, assignments, mastery, submissions)
+ * Fetches ALL linked, pending & rejected children.
+ * Student progress is ONLY fetched when status === 'linked' (approved by Admin).
  */
 export async function fetchParentChildrenDashboards(
   parentId: string
@@ -667,9 +681,20 @@ export async function fetchParentChildrenDashboards(
   const snapshots = await Promise.all(
     links.map(async (link: Record<string, unknown>): Promise<ParentChildSnapshot> => {
       const studentId = link.student_id ? String(link.student_id) : undefined;
+      const rawStatus = String(link.status || "pending_admin");
+      const status: ParentChildSnapshot["status"] =
+        rawStatus === "linked" ||
+        rawStatus === "rejected" ||
+        rawStatus === "revoked" ||
+        rawStatus === "pending"
+          ? rawStatus
+          : "pending_admin";
+      const isLinked = Boolean(studentId && status === "linked");
+
       const base: ParentChildSnapshot = {
         linkId: String(link.id),
-        linked: Boolean(studentId && link.status === "linked"),
+        linked: isLinked,
+        status,
         studentId,
         childName: String(link.invited_child_name || "Votre enfant"),
         childLevel: String(link.invited_child_level || "Lycée"),
@@ -680,7 +705,7 @@ export async function fetchParentChildrenDashboards(
         recentSubmissions: [],
       };
 
-      if (!studentId) return base;
+      if (!isLinked || !studentId) return base;
 
       const childData = await fetchStudentDashboardData(studentId);
       return {
@@ -1011,4 +1036,238 @@ export async function fetchAssignmentPolicyAndAttempt(
     timeLimitMinutes,
     previousAttempt,
   };
+}
+
+// =============================================================================
+// ADMIN CRUD & APPROVAL RPCs (Students, Teachers/Tutors, Parents, Parent Links)
+// =============================================================================
+
+export interface AdminUserRecord {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: "student" | "teacher" | "parent" | "org_admin" | "platform_admin";
+  level: string | null;
+  accountStatus: "pending" | "approved" | "rejected";
+  createdAt: string;
+}
+
+export interface AdminParentLinkRecord {
+  id: string;
+  parentId: string;
+  parentName: string;
+  parentEmail: string;
+  studentId: string | null;
+  studentName: string;
+  studentEmail: string;
+  studentLevel: string;
+  studentAccountExists: boolean;
+  status: "pending_admin" | "pending" | "linked" | "rejected" | "revoked";
+  createdAt: string;
+}
+
+export async function fetchAdminUsers(): Promise<{
+  users: AdminUserRecord[];
+  error?: string;
+}> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { users: [], error: "Connexion à la base indisponible." };
+  }
+
+  const { data, error } = await supabase.rpc("admin_list_all_users");
+  if (error) {
+    return { users: [], error: error.message };
+  }
+
+  const users: AdminUserRecord[] = (Array.isArray(data) ? data : []).map(
+    (r: Record<string, unknown>) => ({
+      id: String(r.id),
+      email: String(r.email || ""),
+      firstName: String(r.first_name || ""),
+      lastName: String(r.last_name || ""),
+      role: (String(r.default_role || "student") as AdminUserRecord["role"]),
+      level: r.level ? String(r.level) : null,
+      accountStatus:
+        r.account_status === "pending" || r.account_status === "rejected"
+          ? r.account_status
+          : "approved",
+      createdAt: String(r.created_at || new Date().toISOString()),
+    })
+  );
+
+  return { users };
+}
+
+export async function adminCreateUser(params: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  role: "student" | "teacher" | "parent" | "org_admin";
+  level?: string;
+}): Promise<{ ok: boolean; userId?: string; error?: string; warning?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  const ephemeral = createEphemeralSupabaseClient();
+  if (!isSupabaseConfigured || !supabase || !ephemeral) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+
+  const normalizedEmail = params.email.trim().toLowerCase();
+  const cleanLevel = params.role === "student" ? params.level || "Terminale" : null;
+
+  const { data, error } = await ephemeral.auth.signUp({
+    email: normalizedEmail,
+    password: params.password,
+    options: {
+      data: {
+        firstName: params.firstName.trim(),
+        lastName: params.lastName.trim(),
+        role: params.role,
+        level: cleanLevel,
+      },
+    },
+  });
+
+  if (error) {
+    return { ok: false, error: error.message };
+  }
+
+  const newUserId = data.user?.id;
+  if (!newUserId) {
+    return { ok: false, error: "Compte non créé (vérifiez si l'adresse e-mail existe déjà)." };
+  }
+
+  // Accounts created directly by Admin are approved immediately
+  const { data: updateRes, error: updateErr } = await supabase.rpc("admin_update_user", {
+    p_user_id: newUserId,
+    p_first_name: params.firstName.trim(),
+    p_last_name: params.lastName.trim(),
+    p_role: params.role,
+    p_level: cleanLevel || "",
+    p_account_status: "approved",
+  });
+
+  if (updateErr || (updateRes && !updateRes.ok)) {
+    return {
+      ok: true,
+      userId: newUserId,
+      warning:
+        "Compte créé mais la validation automatique a échoué — cliquez sur Approuver dans la liste.",
+    };
+  }
+
+  return { ok: true, userId: newUserId };
+}
+
+export async function adminUpdateUser(params: {
+  userId: string;
+  firstName?: string;
+  lastName?: string;
+  role?: "student" | "teacher" | "parent" | "org_admin" | "platform_admin";
+  level?: string | null;
+  accountStatus?: "pending" | "approved" | "rejected";
+}): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+
+  const { data, error } = await supabase.rpc("admin_update_user", {
+    p_user_id: params.userId,
+    p_first_name: params.firstName ?? null,
+    p_last_name: params.lastName ?? null,
+    p_role: params.role ?? null,
+    p_level: params.level === undefined ? null : params.level ?? "",
+    p_account_status: params.accountStatus ?? null,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Erreur lors de la mise à jour." };
+  return { ok: true };
+}
+
+export async function adminDeleteUser(userId: string): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+
+  const { data, error } = await supabase.rpc("admin_delete_user", {
+    p_user_id: userId,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Impossible de supprimer ce compte." };
+  return { ok: true };
+}
+
+export async function fetchAdminParentLinks(): Promise<{
+  links: AdminParentLinkRecord[];
+  error?: string;
+}> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { links: [], error: "Connexion à la base indisponible." };
+  }
+
+  const { data, error } = await supabase.rpc("admin_list_parent_links");
+  if (error) return { links: [], error: error.message };
+
+  const links: AdminParentLinkRecord[] = (Array.isArray(data) ? data : []).map(
+    (r: Record<string, unknown>) => ({
+      id: String(r.id),
+      parentId: String(r.parent_id),
+      parentName: String(r.parent_name || "Parent"),
+      parentEmail: String(r.parent_email || ""),
+      studentId: r.student_id ? String(r.student_id) : null,
+      studentName: String(r.student_name || "Élève"),
+      studentEmail: String(r.student_email || ""),
+      studentLevel: String(r.student_level || "Lycée"),
+      studentAccountExists: Boolean(r.student_account_exists),
+      status: (String(r.status || "pending_admin") as AdminParentLinkRecord["status"]),
+      createdAt: String(r.created_at || new Date().toISOString()),
+    })
+  );
+
+  return { links };
+}
+
+export async function adminReviewParentLink(
+  linkId: string,
+  action: "approve" | "reject" | "delete"
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+
+  const { data, error } = await supabase.rpc("admin_review_parent_link", {
+    p_link_id: linkId,
+    p_action: action,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Action impossible." };
+  return { ok: true };
+}
+
+export async function adminCreateParentLink(
+  parentId: string,
+  studentId: string
+): Promise<{ ok: boolean; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+
+  const { data, error } = await supabase.rpc("admin_create_parent_link", {
+    p_parent_id: parentId,
+    p_student_id: studentId,
+  });
+
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Impossible de créer la liaison." };
+  return { ok: true };
 }

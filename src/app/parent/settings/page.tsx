@@ -71,8 +71,8 @@ export default function ParentSettingsPage() {
     setNewChildName("");
     showToast(
       res.linked
-        ? `✅ ${res.childName || "Enfant"} rattaché instantanément !`
-        : "⏳ Invitation enregistrée — liaison automatique à l'inscription de l'élève."
+        ? `✅ ${res.childName || "Enfant"} est déjà rattaché et validé.`
+        : "⏳ Demande de liaison envoyée à l'administrateur pour validation."
     );
     await loadChildren();
   };
@@ -200,10 +200,16 @@ export default function ParentSettingsPage() {
                         className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                           c.linked
                             ? "bg-emerald-100 text-emerald-700"
+                            : c.status === "rejected"
+                            ? "bg-rose-100 text-rose-700"
                             : "bg-amber-100 text-amber-800"
                         }`}
                       >
-                        {c.linked ? "● Lié" : "⏳ En attente"}
+                        {c.linked
+                          ? "● Validé par l'admin"
+                          : c.status === "rejected"
+                          ? "❌ Refusé par l'admin"
+                          : "⏳ En attente admin"}
                       </span>
                     </div>
                     <div className="text-xs text-slate-500 mt-0.5">
@@ -223,7 +229,9 @@ export default function ParentSettingsPage() {
           )}
 
           <form onSubmit={handleAddChild} className="pt-3 border-t border-slate-100 space-y-3">
-            <div className="text-xs font-bold text-slate-700">Rattacher un enfant par e-mail</div>
+            <div className="text-xs font-bold text-slate-700">
+              Demander le rattachement d&apos;un élève (validation administrateur requise)
+            </div>
             <div className="grid sm:grid-cols-3 gap-3">
               <input
                 type="email"
@@ -256,7 +264,7 @@ export default function ParentSettingsPage() {
                 disabled={linking}
                 className="bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl hover:bg-emerald-700 text-xs disabled:opacity-60"
               >
-                {linking ? "⏳ Liaison…" : "+ Rattacher cet enfant"}
+                {linking ? "⏳ Envoi…" : "📩 Envoyer la demande à l'admin"}
               </button>
             </div>
           </form>
