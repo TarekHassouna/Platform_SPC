@@ -92,10 +92,6 @@ export default function SignupPage() {
       setError("Veuillez indiquer le nom de votre établissement ou activité de tutorat.");
       return;
     }
-    if (role === "parent" && (!form.childName.trim() || !form.childLevel)) {
-      setError("Veuillez renseigner le prénom et le niveau scolaire de votre enfant.");
-      return;
-    }
     if (role === "org_admin" && !form.school.trim()) {
       setError("Veuillez renseigner le nom de votre établissement.");
       return;
@@ -331,41 +327,22 @@ export default function SignupPage() {
 
             {/* PARENT relational fields */}
             {role === "parent" && (
-              <>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Prénom de l&apos;enfant *</label>
-                    <input
-                      type="text"
-                      placeholder="Amira"
-                      className={inputClass}
-                      value={form.childName}
-                      onChange={(e) => set("childName", e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Niveau de l&apos;enfant *</label>
-                    <select className={selectClass} value={form.childLevel} onChange={(e) => set("childLevel", e.target.value)}>
-                      <option value="">Choisir…</option>
-                      <option value="Seconde">Seconde</option>
-                      <option value="Première">Première</option>
-                      <option value="Terminale">Terminale</option>
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    E-mail de l&apos;enfant <span className="text-slate-400 font-normal">(liaison automatique)</span>
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="amira@exemple.fr"
-                    className={inputClass}
-                    value={form.childEmail}
-                    onChange={(e) => set("childEmail", e.target.value)}
-                  />
-                </div>
-              </>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  E-mail du compte élève de votre enfant{" "}
+                  <span className="text-slate-400 font-normal">(optionnel — liaison instantanée)</span>
+                </label>
+                <input
+                  type="email"
+                  placeholder="eleve@exemple.com"
+                  className={inputClass}
+                  value={form.childEmail}
+                  onChange={(e) => set("childEmail", e.target.value)}
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Vous pourrez aussi ajouter ou rattacher vos enfants par e-mail à tout moment après connexion.
+                </p>
+              </div>
             )}
 
             {/* ORG ADMIN relational fields */}
