@@ -148,6 +148,88 @@ export default function TeacherResultsPage() {
     }
   };
 
+  const handleExportGradebookCsv = () => {
+    if (!activeClass) return;
+    const esc = (v: string | number) => {
+      const s = String(v ?? "");
+      if (/[;"\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+      return s;
+    };
+
+    // Build headers: Student info + every skill/exercise column + overall accuracy
+    const cols = allSkills;
+    const headers = [
+      "Élève",
+      "E-mail",
+      "Classe",
+      ...cols,
+      "Moyenne (%)",
+      "Exercices rendus",
+    ];
+
+    const dataRows = activeClass.students.map((stu) => {
+      const perCol = cols.map((colName) => {
+        // Prefer exact best raw score (e.g., 16,5/20) from recentAttempts if present
+        const matching = stu.recentAttempts.filter((a) => a.exerciseTitle === colName);
+        if (matching.length > 0) {
+          const best = matching.reduce((b, cur) =>
+            cur.maxScore > 0 && cur.score / cur.maxScore > (b.maxScore > 0 ? b.score / b.maxScore : -1)
+              ? cur
+              : b
+          );
+          return `${best.score.toFixed(1).replace(".", ",")}/${best.maxScore}`;
+        }
+        const pct = stu.skills[colName];
+        if (typeof pct === "number" && pct >= 0) return `${pct}%`;
+        return "";
+      });
+
+      return [
+        stu.name,
+        stu.email,
+        activeClass.name,
+        ...perCol,
+        stu.recentAttempts.length > 0 ? `${stu.accuracy}%` : "",
+        String(stu.recentAttempts.length),
+      ];
+    });
+
+    // Class averages summary row
+    const avgRow = [
+      "MOYENNE DE LA CLASSE",
+      "",
+      activeClass.level,
+      ...cols.map((colName) => {
+        const vals = activeClass.students
+          .map((s) => s.skills[colName])
+          .filter((v): v is number => typeof v === "number" && v >= 0);
+        if (vals.length === 0) return "";
+        return `${Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)}%`;
+      }),
+      activeClass.students.length > 0
+        ? `${Math.round(
+            activeClass.students.reduce((a, s) => a + s.accuracy, 0) / activeClass.students.length
+          )}%`
+        : "",
+      "",
+    ];
+
+    const csvLines = [headers, ...dataRows, avgRow].map((row) => row.map(esc).join(";"));
+    const csvContent = "\uFEFF" + csvLines.join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const safeClass = activeClass.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+    a.href = url;
+    a.download = `notes_${safeClass}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setGradeNotice({
+      ok: true,
+      text: `📥 Relevé de notes exporté pour ${activeClass.name} (${activeClass.students.length} élève(s)).`,
+    });
+  };
+
   return (
     <TeacherShell>
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -157,6 +239,15 @@ export default function TeacherResultsPage() {
             Choisis un exercice pour inspecter uniquement ses copies et modifier les notes de tes élèves librement.
           </p>
         </div>
+        {activeClass && activeClass.students.length > 0 && (
+          <button
+            type="button"
+            onClick={handleExportGradebookCsv}
+            className="bg-emerald-600 text-white font-bold px-4 py-2.5 rounded-xl hover:bg-emerald-700 text-xs shadow-sm whitespace-nowrap self-start sm:self-auto"
+          >
+            📥 Exporter Excel / CSV
+          </button>
+        )}
       </div>
 
       {/* Class tabs */}

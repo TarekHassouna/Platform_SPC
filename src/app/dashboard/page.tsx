@@ -7,7 +7,10 @@ import Link from "next/link";
 import {
   fetchStudentDashboardData,
   joinClassWithCode,
+  fetchClassAnnouncements,
+  getCourseFileSignedUrl,
   type StudentDashboardPayload,
+  type ClassAnnouncementRecord,
 } from "@/lib/db";
 import { CURRICULUM_EXERCISES } from "@/lib/curriculum-bank";
 
@@ -35,6 +38,7 @@ export default function DashboardPage() {
   const [joinMessage, setJoinMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [joining, setJoining] = useState(false);
   const [hwTab, setHwTab] = useState<"todo" | "done">("todo");
+  const [announcements, setAnnouncements] = useState<ClassAnnouncementRecord[]>([]);
 
   useEffect(() => {
     if (user && user.role !== "student") {
@@ -44,9 +48,13 @@ export default function DashboardPage() {
       return;
     }
     if (user?.id) {
-      fetchStudentDashboardData(user.id).then((res) => {
+      fetchStudentDashboardData(user.id).then(async (res) => {
         setData(res);
         setLoadingData(false);
+        if (res.enrolledClasses.length > 0) {
+          const anns = await fetchClassAnnouncements(res.enrolledClasses.map((c) => c.id));
+          setAnnouncements(anns);
+        }
       });
     } else {
       setLoadingData(false);
@@ -170,6 +178,7 @@ export default function DashboardPage() {
   const navItems = [
     { icon: "🏠", label: "Tableau de bord", href: "/dashboard", active: true },
     { icon: "📚", label: "Exercices & cours", href: "/exercises", active: false },
+    { icon: "🎓", label: "Bac Blanc chrono", href: "/exam", active: false },
     { icon: "🗺️", label: "Ma progression", href: "/progress", active: false },
     { icon: "💬", label: "Tuteur IA", href: "/tutor", active: false },
     { icon: "📸", label: "Photo & correction", href: "/photo", active: false },
@@ -306,8 +315,66 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
-          {/* Left: Class assignments + Recommended exercises */}
+          {/* Left: Class announcements + Class assignments + Recommended exercises */}
           <div className="lg:col-span-2 space-y-6">
+            {announcements.length > 0 && (
+              <div className="bg-white border border-indigo-100 rounded-3xl p-5 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-extrabold text-slate-900">
+                    📢 Annonces &amp; Fiches de cours ({announcements.length})
+                  </h2>
+                </div>
+                <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                  {announcements.map((a) => (
+                    <div
+                      key={a.id}
+                      className={`rounded-2xl p-3.5 border ${
+                        a.isPinned
+                          ? "bg-amber-50/70 border-amber-200"
+                          : "bg-slate-50 border-slate-100"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {a.isPinned && (
+                            <span className="text-[10px] font-bold bg-amber-200/70 text-amber-900 px-2 py-0.5 rounded-full">
+                              📌 Important
+                            </span>
+                          )}
+                          {a.className && (
+                            <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                              {a.className}
+                            </span>
+                          )}
+                          <span className="text-sm font-bold text-slate-900">{a.title}</span>
+                        </div>
+                        <span className="text-[11px] text-slate-400">
+                          {new Date(a.createdAt).toLocaleDateString("fr-FR")}
+                        </span>
+                      </div>
+                      {a.body && (
+                        <p className="text-xs text-slate-600 mt-1.5 leading-relaxed whitespace-pre-wrap">
+                          {a.body}
+                        </p>
+                      )}
+                      {a.attachmentPath && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const url = await getCourseFileSignedUrl(a.attachmentPath!);
+                            if (url) window.open(url, "_blank", "noopener,noreferrer");
+                          }}
+                          className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold bg-white border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-xl hover:bg-indigo-50"
+                        >
+                          📄 {a.attachmentName || "Télécharger la fiche PDF"} ↗
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {data.assignments.length > 0 && (() => {
               const todoList = data.assignments.filter((a) => !a.completed);
               const doneList = data.assignments.filter((a) => a.completed);

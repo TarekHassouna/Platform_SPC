@@ -14,6 +14,8 @@ import {
   adminDeleteClass,
   adminAddStudentToClass,
   adminRemoveStudentFromClass,
+  adminBulkApproveUsers,
+  adminBulkAddStudentsToClass,
   type AdminUserRecord,
   type AdminParentLinkRecord,
   type AdminClassRecord,
@@ -76,6 +78,13 @@ interface OrgStoreContextType {
     classId: string,
     studentId: string
   ) => Promise<{ ok: boolean; error?: string }>;
+  bulkApproveUsers: (
+    userIds?: string[]
+  ) => Promise<{ ok: boolean; approvedCount?: number; error?: string }>;
+  bulkAddStudentsToClass: (
+    classId: string,
+    studentIds: string[]
+  ) => Promise<{ ok: boolean; addedCount?: number; className?: string; error?: string }>;
 }
 
 const OrgStoreContext = createContext<OrgStoreContextType | null>(null);
@@ -242,6 +251,21 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
     return res;
   };
 
+  const bulkApproveUsers: OrgStoreContextType["bulkApproveUsers"] = async (userIds) => {
+    const res = await adminBulkApproveUsers(userIds);
+    if (res.ok) await reloadAll();
+    return res;
+  };
+
+  const bulkAddStudentsToClass: OrgStoreContextType["bulkAddStudentsToClass"] = async (
+    classId,
+    studentIds
+  ) => {
+    const res = await adminBulkAddStudentsToClass(classId, studentIds);
+    if (res.ok) await reloadAll();
+    return res;
+  };
+
   const pendingUsersCount = users.filter((u) => u.accountStatus === "pending").length;
   const pendingLinksCount = parentLinks.filter(
     (l) => l.status === "pending_admin" || l.status === "pending"
@@ -277,6 +301,8 @@ export function OrgStoreProvider({ children }: { children: ReactNode }) {
         deleteClass,
         addStudentToClass,
         removeStudentFromClass,
+        bulkApproveUsers,
+        bulkAddStudentsToClass,
       }}
     >
       {children}

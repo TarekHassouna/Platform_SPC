@@ -5,6 +5,7 @@ import { ADMIN_GATE_COOKIE, verifyAdminGateToken } from "@/lib/admin-gate";
 const PROTECTED_PREFIXES = [
   "/dashboard",
   "/exercises",
+  "/exam",
   "/progress",
   "/tutor",
   "/photo",

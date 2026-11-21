@@ -4,7 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useOrgStore } from "@/lib/org-store";
 import { OrgShell } from "@/components/OrgShell";
-import type { AdminUserRecord } from "@/lib/db";
+import { adminCreateUser, type AdminUserRecord } from "@/lib/db";
 
 const inputCls =
   "w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
@@ -41,6 +41,8 @@ function OrgUsersContent() {
     rejectUser,
     deleteUser,
     addStudentToClass,
+    bulkApproveUsers,
+    bulkAddStudentsToClass,
   } = useOrgStore();
 
   const [roleFilter, setRoleFilter] = useState<string>(initialRole);
@@ -48,6 +50,20 @@ function OrgUsersContent() {
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Bulk selection & actions
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkClassId, setBulkClassId] = useState<string>("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // CSV Bulk Import state
+  const [showCsvImport, setShowCsvImport] = useState(false);
+  const [csvTargetClassId, setCsvTargetClassId] = useState("");
+  const [csvRows, setCsvRows] = useState<
+    { firstName: string; lastName: string; email: string; password: string; level: string }[]
+  >([]);
+  const [csvProgress, setCsvProgress] = useState<{ done: number; total: number } | null>(null);
+  const [csvReport, setCsvReport] = useState<{ created: number; errors: string[] } | null>(null);
 
   // Create form state
   const [showCreate, setShowCreate] = useState(initialCreate);
@@ -208,6 +224,156 @@ function OrgUsersContent() {
     pending: users.filter((u) => u.accountStatus === "pending").length,
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const selectableFilteredIds = filteredUsers
+    .filter((u) => u.id !== currentUser?.id)
+    .map((u) => u.id);
+  const allFilteredSelected =
+    selectableFilteredIds.length > 0 &&
+    selectableFilteredIds.every((id) => selectedIds.includes(id));
+
+  const toggleSelectAllFiltered = () => {
+    if (allFilteredSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !selectableFilteredIds.includes(id)));
+    } else {
+      setSelectedIds((prev) => Array.from(new Set([...prev, ...selectableFilteredIds])));
+    }
+  };
+
+  const handleBulkApprove = async (ids?: string[]) => {
+    setBulkBusy(true);
+    const res = await bulkApproveUsers(ids);
+    setBulkBusy(false);
+    if (!res.ok) {
+      showToast(`⚠️ ${res.error || "Erreur de validation groupée."}`);
+      return;
+    }
+    setSelectedIds([]);
+    showToast(`✅ ${res.approvedCount ?? 0} compte(s) validé(s) !`);
+  };
+
+  const handleBulkAssignClass = async () => {
+    if (!bulkClassId || selectedIds.length === 0) return;
+    const studentIds = selectedIds.filter((id) => {
+      const u = users.find((x) => x.id === id);
+      return u?.role === "student";
+    });
+    if (studentIds.length === 0) {
+      showToast("⚠️ Sélectionnez au moins un compte Élève.");
+      return;
+    }
+    setBulkBusy(true);
+    const res = await bulkAddStudentsToClass(bulkClassId, studentIds);
+    setBulkBusy(false);
+    if (!res.ok) {
+      showToast(`⚠️ ${res.error || "Affectation groupée impossible."}`);
+      return;
+    }
+    setSelectedIds([]);
+    setBulkClassId("");
+    showToast(`✅ ${studentIds.length} élève(s) affecté(s) à ${res.className || "la classe"} !`);
+  };
+
+  const downloadCsvTemplate = () => {
+    const csv =
+      "\uFEFFPrenom;Nom;Email;MotDePasse;Niveau\n" +
+      "Sami;Haddad;sami.haddad@exemple.fr;Spc2026!;Terminale\n" +
+      "Lina;Moreau;lina.moreau@exemple.fr;Spc2026!;Première\n";
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "modele_import_eleves_spc.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCsvFileChange = async (file: File | undefined) => {
+    if (!file) return;
+    setCsvReport(null);
+    const raw = await file.text();
+    const lines = raw
+      .replace(/^\uFEFF/, "")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    const parsed: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      password: string;
+      level: string;
+    }[] = [];
+
+    lines.forEach((line, idx) => {
+      const cols = line.split(/[;,]/).map((c) => c.trim().replace(/^"|"$/g, ""));
+      if (idx === 0 && (cols[0]?.toLowerCase().includes("pr") || cols[2]?.toLowerCase().includes("mail"))) {
+        return;
+      }
+      const [firstName, lastName, email, password, rawLevel] = cols;
+      if (!email || !email.includes("@")) return;
+      const lvl =
+        rawLevel === "Seconde" || rawLevel === "Première" || rawLevel === "Terminale"
+          ? rawLevel
+          : "Terminale";
+      parsed.push({
+        firstName: firstName || email.split("@")[0],
+        lastName: lastName || "",
+        email: email.toLowerCase(),
+        password: password && password.length >= 8 ? password : `Spc${Math.floor(100000 + Math.random() * 899999)}!`,
+        level: lvl,
+      });
+    });
+
+    setCsvRows(parsed);
+    if (parsed.length === 0) {
+      showToast("⚠️ Aucune ligne valide détectée (format : Prenom;Nom;Email;MotDePasse;Niveau).");
+    }
+  };
+
+  const handleRunCsvImport = async () => {
+    if (csvRows.length === 0) return;
+    setCsvProgress({ done: 0, total: csvRows.length });
+    setCsvReport(null);
+    const createdIds: string[] = [];
+    const errors: string[] = [];
+
+    for (let i = 0; i < csvRows.length; i++) {
+      const r = csvRows[i];
+      const res = await adminCreateUser({
+        firstName: r.firstName,
+        lastName: r.lastName,
+        email: r.email,
+        password: r.password,
+        role: "student",
+        level: r.level,
+      });
+      if (res.ok && res.userId) {
+        createdIds.push(res.userId);
+      } else {
+        errors.push(`${r.email} : ${res.error || "échec"}`);
+      }
+      setCsvProgress({ done: i + 1, total: csvRows.length });
+    }
+
+    if (csvTargetClassId && createdIds.length > 0) {
+      await bulkAddStudentsToClass(csvTargetClassId, createdIds);
+    } else {
+      await reloadAll();
+    }
+
+    setCsvProgress(null);
+    setCsvReport({ created: createdIds.length, errors });
+    setCsvRows([]);
+    showToast(`✅ Import terminé : ${createdIds.length} élève(s) créé(s) et validé(s) !`);
+  };
+
   return (
     <OrgShell>
       {toast && (
@@ -223,10 +389,30 @@ function OrgUsersContent() {
             👥 Gestion des utilisateurs (CRUD)
           </h1>
           <p className="text-slate-500 mt-1 text-sm">
-            Créez, validez, modifiez ou supprimez les comptes Élèves, Enseignants / Tuteurs et Parents.
+            Créez, importez en masse (CSV), validez, modifiez ou supprimez les comptes Élèves, Enseignants / Tuteurs et Parents.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {counts.pending > 0 && (
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => handleBulkApprove()}
+              className="bg-emerald-600 text-white font-bold px-3.5 py-2.5 rounded-xl hover:bg-emerald-700 text-xs shadow-sm disabled:opacity-50"
+            >
+              ✅ Tout valider ({counts.pending})
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setShowCsvImport((v) => !v);
+              setShowCreate(false);
+            }}
+            className="border border-emerald-200 bg-emerald-50 text-emerald-800 font-bold px-3.5 py-2.5 rounded-xl hover:bg-emerald-100 text-xs"
+          >
+            {showCsvImport ? "Fermer CSV" : "📄 Import CSV élèves"}
+          </button>
           <button
             type="button"
             onClick={() => reloadAll()}
@@ -236,13 +422,121 @@ function OrgUsersContent() {
           </button>
           <button
             type="button"
-            onClick={() => setShowCreate((v) => !v)}
+            onClick={() => {
+              setShowCreate((v) => !v);
+              setShowCsvImport(false);
+            }}
             className="bg-indigo-600 text-white font-bold px-4 py-2.5 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-100 text-xs"
           >
             {showCreate ? "Fermer" : "➕ Créer un compte"}
           </button>
         </div>
       </div>
+
+      {/* CSV BULK IMPORT PANEL */}
+      {showCsvImport && (
+        <div className="bg-white rounded-3xl border border-emerald-200 p-6 mb-7 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="font-extrabold text-slate-900 text-base">
+                📄 Import en masse d&apos;élèves (CSV / Excel)
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Colonnes attendues : <code className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">Prenom;Nom;Email;MotDePasse;Niveau</code> (séparateur <code>;</code> ou <code>,</code>). Les comptes importés sont validés immédiatement.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={downloadCsvTemplate}
+              className="text-xs font-bold border border-slate-200 bg-slate-50 text-slate-700 px-3.5 py-2 rounded-xl hover:bg-slate-100 shrink-0"
+            >
+              📥 Télécharger modèle CSV
+            </button>
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                1. Choisir le fichier CSV
+              </label>
+              <input
+                type="file"
+                accept=".csv,.txt"
+                onChange={(e) => handleCsvFileChange(e.target.files?.[0])}
+                className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-700 bg-white file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 file:font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                2. Affecter tous les élèves importés à une classe (optionnel)
+              </label>
+              <select
+                value={csvTargetClassId}
+                onChange={(e) => setCsvTargetClassId(e.target.value)}
+                className={inputCls}
+              >
+                <option value="">Ne pas affecter à une classe</option>
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    🏫 {c.name} ({c.level}) · Code : {c.inviteCode}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {csvRows.length > 0 && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-indigo-900">
+                <strong>{csvRows.length} élève(s)</strong> prêt(s) à être créé(s) et validé(s)
+                {csvTargetClassId && " puis inscrit(s) dans la classe sélectionnée"}.
+              </div>
+              <button
+                type="button"
+                disabled={Boolean(csvProgress)}
+                onClick={handleRunCsvImport}
+                className="bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl text-xs hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {csvProgress
+                  ? `Import en cours (${csvProgress.done}/${csvProgress.total})…`
+                  : `🚀 Lancer l'import (${csvRows.length} élèves)`}
+              </button>
+            </div>
+          )}
+
+          {csvProgress && (
+            <div className="space-y-1">
+              <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-emerald-500 transition-all"
+                  style={{ width: `${Math.round((csvProgress.done / csvProgress.total) * 100)}%` }}
+                />
+              </div>
+              <div className="text-[11px] text-slate-500">
+                Création {csvProgress.done} / {csvProgress.total}…
+              </div>
+            </div>
+          )}
+
+          {csvReport && (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-xs space-y-1.5">
+              <div className="font-bold text-emerald-700">
+                ✅ {csvReport.created} compte(s) créé(s) avec succès.
+              </div>
+              {csvReport.errors.length > 0 && (
+                <div className="text-rose-700 space-y-0.5">
+                  <div className="font-bold">⚠️ {csvReport.errors.length} ligne(s) ignorée(s) :</div>
+                  <ul className="list-disc pl-5 max-h-28 overflow-y-auto">
+                    {csvReport.errors.map((err, i) => (
+                      <li key={i}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="mb-5 bg-rose-50 border border-rose-200 text-rose-800 rounded-2xl p-4 text-xs font-semibold">
@@ -441,12 +735,73 @@ function OrgUsersContent() {
         </div>
       </div>
 
+      {/* Bulk Action Bar when rows are selected */}
+      {selectedIds.length > 0 && (
+        <div className="mb-4 bg-indigo-950 text-white rounded-2xl px-5 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-lg">
+          <div className="text-xs font-bold">
+            ☑️ {selectedIds.length} compte(s) sélectionné(s)
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => handleBulkApprove(selectedIds)}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl disabled:opacity-50"
+            >
+              ✅ Valider la sélection
+            </button>
+            {classes.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={bulkClassId}
+                  onChange={(e) => setBulkClassId(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-white text-xs font-semibold px-3 py-2 rounded-xl outline-none"
+                >
+                  <option value="">Affecter élèves à…</option>
+                  {classes.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.inviteCode})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!bulkClassId || bulkBusy}
+                  onClick={handleBulkAssignClass}
+                  className="bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold px-3.5 py-2 rounded-xl disabled:opacity-40"
+                >
+                  🏫 Affecter
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="text-xs text-slate-300 hover:text-white px-2.5 py-1.5"
+            >
+              Annuler
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Users Table */}
       <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h2 className="font-bold text-slate-900 text-sm">
-            Liste des comptes ({filteredUsers.length})
-          </h2>
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allFilteredSelected}
+              onChange={toggleSelectAllFiltered}
+              className="w-4 h-4 accent-indigo-600 rounded"
+            />
+            <h2 className="font-bold text-slate-900 text-sm">
+              Liste des comptes ({filteredUsers.length})
+            </h2>
+          </label>
+          <span className="text-[11px] text-slate-400">
+            Cochez des comptes pour valider ou affecter à une classe en masse
+          </span>
         </div>
 
         {loading ? (
@@ -478,6 +833,16 @@ function OrgUsersContent() {
                   className="px-6 py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3 hover:bg-slate-50/50 transition-colors"
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
+                    {!isSelf ? (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(u.id)}
+                        onChange={() => toggleSelect(u.id)}
+                        className="w-4 h-4 accent-indigo-600 shrink-0"
+                      />
+                    ) : (
+                      <div className="w-4 shrink-0" />
+                    )}
                     <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-700 font-bold text-xs flex items-center justify-center uppercase shrink-0">
                       {(u.firstName?.[0] || "U") + (u.lastName?.[0] || "")}
                     </div>

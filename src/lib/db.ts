@@ -1413,3 +1413,178 @@ export async function adminDeleteClass(classId: string): Promise<{ ok: boolean; 
   if (data && !data.ok) return { ok: false, error: data.error || "Impossible de supprimer la classe." };
   return { ok: true };
 }
+
+// =============================================================================
+// ADMIN BULK ACTIONS & CLASS ANNOUNCEMENTS / COURSE PDFs
+// =============================================================================
+
+export async function adminBulkApproveUsers(
+  userIds?: string[]
+): Promise<{ ok: boolean; approvedCount?: number; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+  const { data, error } = await supabase.rpc("admin_bulk_approve_users", {
+    p_user_ids: userIds && userIds.length > 0 ? userIds : null,
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Erreur lors de la validation groupée." };
+  return { ok: true, approvedCount: Number(data?.approved_count ?? 0) };
+}
+
+export async function adminBulkAddStudentsToClass(
+  classId: string,
+  studentIds: string[]
+): Promise<{ ok: boolean; addedCount?: number; className?: string; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+  const { data, error } = await supabase.rpc("admin_bulk_add_students_to_class", {
+    p_class_id: classId,
+    p_student_ids: studentIds,
+  });
+  if (error) return { ok: false, error: error.message };
+  if (data && !data.ok) return { ok: false, error: data.error || "Affectation groupée impossible." };
+  return {
+    ok: true,
+    addedCount: Number(data?.added_count ?? 0),
+    className: data?.class_name ? String(data.class_name) : undefined,
+  };
+}
+
+export interface ClassAnnouncementRecord {
+  id: string;
+  classId: string;
+  className?: string;
+  teacherId: string;
+  title: string;
+  body: string;
+  attachmentPath: string | null;
+  attachmentName: string | null;
+  isPinned: boolean;
+  createdAt: string;
+}
+
+export async function fetchClassAnnouncements(
+  classIds: string[]
+): Promise<ClassAnnouncementRecord[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase || classIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("class_announcements")
+    .select("id, class_id, teacher_id, title, body, attachment_path, attachment_name, is_pinned, created_at, classes(name)")
+    .in("class_id", classIds)
+    .order("is_pinned", { ascending: false })
+    .order("created_at", { ascending: false });
+
+  if (error || !data) return [];
+
+  return data.map((r: Record<string, unknown>) => {
+    const cls = (Array.isArray(r.classes) ? r.classes[0] : r.classes) as { name?: string } | null;
+    return {
+      id: String(r.id),
+      classId: String(r.class_id),
+      className: cls?.name || undefined,
+      teacherId: String(r.teacher_id),
+      title: String(r.title || ""),
+      body: String(r.body || ""),
+      attachmentPath: r.attachment_path ? String(r.attachment_path) : null,
+      attachmentName: r.attachment_name ? String(r.attachment_name) : null,
+      isPinned: Boolean(r.is_pinned),
+      createdAt: String(r.created_at || new Date().toISOString()),
+    };
+  });
+}
+
+export async function createClassAnnouncement(params: {
+  classId: string;
+  teacherId: string;
+  title: string;
+  body: string;
+  isPinned?: boolean;
+  file?: File | null;
+}): Promise<{ ok: boolean; announcement?: ClassAnnouncementRecord; error?: string }> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+
+  let attachmentPath: string | null = null;
+  let attachmentName: string | null = null;
+
+  if (params.file) {
+    const safeName = params.file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const path = `${params.classId}/${Date.now()}_${safeName}`;
+    const { error: upErr } = await supabase.storage
+      .from("course-files")
+      .upload(path, params.file, { cacheControl: "3600", upsert: false });
+    if (upErr) {
+      return { ok: false, error: `Échec de l'envoi du fichier : ${upErr.message}` };
+    }
+    attachmentPath = path;
+    attachmentName = params.file.name;
+  }
+
+  const { data, error } = await supabase
+    .from("class_announcements")
+    .insert({
+      class_id: params.classId,
+      teacher_id: params.teacherId,
+      title: params.title.trim(),
+      body: params.body.trim(),
+      attachment_path: attachmentPath,
+      attachment_name: attachmentName,
+      is_pinned: Boolean(params.isPinned),
+    })
+    .select("id, class_id, teacher_id, title, body, attachment_path, attachment_name, is_pinned, created_at")
+    .single();
+
+  if (error || !data) {
+    return { ok: false, error: error?.message || "Impossible de publier l'annonce." };
+  }
+
+  return {
+    ok: true,
+    announcement: {
+      id: String(data.id),
+      classId: String(data.class_id),
+      teacherId: String(data.teacher_id),
+      title: String(data.title),
+      body: String(data.body),
+      attachmentPath: data.attachment_path ? String(data.attachment_path) : null,
+      attachmentName: data.attachment_name ? String(data.attachment_name) : null,
+      isPinned: Boolean(data.is_pinned),
+      createdAt: String(data.created_at),
+    },
+  };
+}
+
+export async function deleteClassAnnouncement(
+  announcementId: string,
+  attachmentPath?: string | null
+): Promise<boolean> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase || !announcementId) return false;
+
+  if (attachmentPath) {
+    await supabase.storage.from("course-files").remove([attachmentPath]);
+  }
+  const { error } = await supabase
+    .from("class_announcements")
+    .delete()
+    .eq("id", announcementId);
+  return !error;
+}
+
+export async function getCourseFileSignedUrl(path: string): Promise<string | null> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase || !path) return null;
+  const { data, error } = await supabase.storage
+    .from("course-files")
+    .createSignedUrl(path, 3600);
+  if (error || !data?.signedUrl) return null;
+  return data.signedUrl;
+}

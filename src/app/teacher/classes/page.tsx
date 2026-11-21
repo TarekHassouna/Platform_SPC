@@ -1,11 +1,20 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useAuth } from "@/lib/auth-context";
 import { useTeacherStore, Level } from "@/lib/teacher-store";
 import { TeacherShell } from "@/components/TeacherShell";
+import {
+  fetchClassAnnouncements,
+  createClassAnnouncement,
+  deleteClassAnnouncement,
+  getCourseFileSignedUrl,
+  type ClassAnnouncementRecord,
+} from "@/lib/db";
 
 export default function TeacherClassesPage() {
-  const { classes, setSelectedClassId, createClass, addStudentToClass } = useTeacherStore();
+  const { user } = useAuth();
+  const { classes, selectedClassId, setSelectedClassId, createClass, addStudentToClass } = useTeacherStore();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [name, setName] = useState("");
@@ -15,6 +24,73 @@ export default function TeacherClassesPage() {
   const [studentName, setStudentName] = useState("");
   const [studentEmail, setStudentEmail] = useState("");
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+
+  // Class Announcements & Course PDFs state
+  const [announcements, setAnnouncements] = useState<ClassAnnouncementRecord[]>([]);
+  const [annClassId, setAnnClassId] = useState<string>("");
+  const [annTitle, setAnnTitle] = useState("");
+  const [annBody, setAnnBody] = useState("");
+  const [annPinned, setAnnPinned] = useState(false);
+  const [annFile, setAnnFile] = useState<File | null>(null);
+  const [publishingAnn, setPublishingAnn] = useState(false);
+  const [annMsg, setAnnMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const loadAnnouncements = useCallback(async () => {
+    const ids = classes.map((c) => c.id);
+    if (ids.length === 0) {
+      setAnnouncements([]);
+      return;
+    }
+    const list = await fetchClassAnnouncements(ids);
+    setAnnouncements(list);
+  }, [classes]);
+
+  useEffect(() => {
+    loadAnnouncements();
+    if (!annClassId && (selectedClassId || classes[0]?.id)) {
+      setAnnClassId(selectedClassId || classes[0]?.id || "");
+    }
+  }, [loadAnnouncements, annClassId, selectedClassId, classes]);
+
+  const handlePublishAnnouncement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const targetClassId = annClassId || classes[0]?.id;
+    if (!targetClassId || !user?.id || !annTitle.trim()) return;
+    setPublishingAnn(true);
+    setAnnMsg(null);
+    const res = await createClassAnnouncement({
+      classId: targetClassId,
+      teacherId: user.id,
+      title: annTitle.trim(),
+      body: annBody.trim(),
+      isPinned: annPinned,
+      file: annFile,
+    });
+    setPublishingAnn(false);
+    if (!res.ok) {
+      setAnnMsg({ ok: false, text: res.error || "Impossible de publier l'annonce." });
+      return;
+    }
+    setAnnTitle("");
+    setAnnBody("");
+    setAnnPinned(false);
+    setAnnFile(null);
+    setAnnMsg({ ok: true, text: "✅ Annonce / fiche publiée pour vos élèves !" });
+    await loadAnnouncements();
+  };
+
+  const handleDeleteAnnouncement = async (a: ClassAnnouncementRecord) => {
+    const ok = await deleteClassAnnouncement(a.id, a.attachmentPath);
+    if (ok) {
+      setAnnouncements((prev) => prev.filter((x) => x.id !== a.id));
+      setAnnMsg({ ok: true, text: "🗑️ Annonce supprimée." });
+    }
+  };
+
+  const handleOpenAttachment = async (path: string) => {
+    const url = await getCourseFileSignedUrl(path);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -257,6 +333,173 @@ export default function TeacherClassesPage() {
           );
         })}
       </div>
+      )}
+
+      {/* Class Announcements & Course PDFs Section */}
+      {classes.length > 0 && (
+        <div className="mt-10 grid lg:grid-cols-12 gap-6">
+          <form
+            onSubmit={handlePublishAnnouncement}
+            className="lg:col-span-5 bg-white border border-slate-100 rounded-3xl p-6 shadow-sm space-y-4 self-start"
+          >
+            <div>
+              <h2 className="font-extrabold text-slate-900 text-base">
+                📢 Publier une annonce ou fiche de cours (PDF)
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Visible immédiatement sur le tableau de bord de tous les élèves de la classe choisie.
+              </p>
+            </div>
+
+            {annMsg && (
+              <div
+                className={`rounded-xl px-3.5 py-2.5 text-xs font-semibold border ${
+                  annMsg.ok
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                    : "bg-rose-50 border-rose-200 text-rose-700"
+                }`}
+              >
+                {annMsg.text}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Classe *</label>
+              <select
+                value={annClassId || classes[0]?.id || ""}
+                onChange={(e) => setAnnClassId(e.target.value)}
+                className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-900 bg-white outline-none focus:border-indigo-400"
+              >
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.level})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Titre *</label>
+              <input
+                type="text"
+                required
+                value={annTitle}
+                onChange={(e) => setAnnTitle(e.target.value)}
+                placeholder="ex : Fiche de révision — Titrages acido-basiques (DS jeudi)"
+                className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-indigo-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Message / consignes
+              </label>
+              <textarea
+                rows={3}
+                value={annBody}
+                onChange={(e) => setAnnBody(e.target.value)}
+                placeholder="Détails du cours, date du contrôle, exercices à préparer…"
+                className="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-indigo-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Joindre un fichier PDF ou image <span className="text-slate-400 font-normal">(optionnel, max 15 Mo)</span>
+              </label>
+              <input
+                type="file"
+                accept=".pdf,image/png,image/jpeg,image/webp"
+                onChange={(e) => setAnnFile(e.target.files?.[0] || null)}
+                className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-600 bg-white file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:bg-indigo-50 file:text-indigo-700 file:font-bold"
+              />
+              {annFile && (
+                <div className="text-[11px] text-emerald-700 font-semibold mt-1">
+                  📎 {annFile.name} ({Math.round(annFile.size / 1024)} Ko)
+                </div>
+              )}
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
+              <input
+                type="checkbox"
+                checked={annPinned}
+                onChange={(e) => setAnnPinned(e.target.checked)}
+                className="w-4 h-4 accent-indigo-600"
+              />
+              📌 Épingler en haut du tableau de bord élève
+            </label>
+
+            <button
+              type="submit"
+              disabled={publishingAnn}
+              className="w-full bg-indigo-600 text-white font-bold py-2.5 rounded-xl text-xs hover:bg-indigo-700 disabled:opacity-50 shadow-sm"
+            >
+              {publishingAnn ? "Publication en cours…" : "📢 Publier dans la classe"}
+            </button>
+          </form>
+
+          <div className="lg:col-span-7 bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h2 className="font-bold text-slate-900 text-sm">
+                📚 Annonces &amp; cours publiés ({announcements.length})
+              </h2>
+            </div>
+            {announcements.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                Aucune annonce ni fiche PDF publiée pour le moment.
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-50 max-h-[440px] overflow-y-auto">
+                {announcements.map((a) => (
+                  <div key={a.id} className="px-6 py-4 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {a.isPinned && (
+                            <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                              📌 Épinglé
+                            </span>
+                          )}
+                          {a.className && (
+                            <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+                              {a.className}
+                            </span>
+                          )}
+                          <span className="text-sm font-bold text-slate-900">{a.title}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          Publié le {new Date(a.createdAt).toLocaleDateString("fr-FR")}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAnnouncement(a)}
+                        className="text-xs font-semibold text-rose-500 hover:bg-rose-50 px-2.5 py-1 rounded-lg shrink-0"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                    {a.body && (
+                      <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
+                        {a.body}
+                      </p>
+                    )}
+                    {a.attachmentPath && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAttachment(a.attachmentPath!)}
+                        className="inline-flex items-center gap-1.5 text-xs font-bold bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-xl hover:bg-indigo-100"
+                      >
+                        📄 {a.attachmentName || "Ouvrir le fichier PDF"} ↗
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Add Student Modal */}
