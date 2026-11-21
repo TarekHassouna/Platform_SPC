@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callTextAI, checkAndIncrementQuota } from "@/lib/ai-provider";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 interface TutorPayload {
   userId?: string;
@@ -44,6 +45,9 @@ function buildFallbackReply(payload: TutorPayload): string {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, { bucket: "tutor", limit: 30, windowMs: 5 * 60_000 });
+  if (limited) return limited;
+
   let payload: TutorPayload;
   try {
     payload = await req.json();

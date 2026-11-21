@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callVisionAI, checkAndIncrementQuota } from "@/lib/ai-provider";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 interface VisionPayload {
   userId?: string;
@@ -10,6 +11,13 @@ interface VisionPayload {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, {
+    bucket: "vision_transcribe",
+    limit: 12,
+    windowMs: 5 * 60_000,
+  });
+  if (limited) return limited;
+
   let payload: VisionPayload;
   try {
     payload = await req.json();

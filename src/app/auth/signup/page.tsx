@@ -442,8 +442,14 @@ export default function SignupPage() {
                 className="mt-0.5 w-4 h-4 accent-indigo-600 shrink-0"
               />
               <span className="text-xs text-slate-600 leading-relaxed">
-                J&apos;accepte les <span className="text-indigo-600 font-semibold">CGU</span> et la{" "}
-                <span className="text-indigo-600 font-semibold">politique RGPD</span>
+                J&apos;accepte les{" "}
+                <Link href="/terms" target="_blank" className="text-indigo-600 font-semibold hover:underline">
+                  CGU
+                </Link>{" "}
+                et la{" "}
+                <Link href="/privacy" target="_blank" className="text-indigo-600 font-semibold hover:underline">
+                  politique RGPD
+                </Link>
                 {role === "student"
                   ? " (avec autorisation parentale si j'ai moins de 15 ans)."
                   : role === "parent"

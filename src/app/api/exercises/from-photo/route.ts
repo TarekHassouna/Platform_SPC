@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callVisionAI, checkAndIncrementQuota } from "@/lib/ai-provider";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 interface FromPhotoPayload {
   userId?: string;
@@ -12,6 +13,13 @@ interface FromPhotoPayload {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, {
+    bucket: "exercises_from_photo",
+    limit: 10,
+    windowMs: 5 * 60_000,
+  });
+  if (limited) return limited;
+
   let payload: FromPhotoPayload;
   try {
     payload = await req.json();

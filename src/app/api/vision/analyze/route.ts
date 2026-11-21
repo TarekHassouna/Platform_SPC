@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callTextAI, callVisionAI } from "@/lib/ai-provider";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 interface AnalyzePayload {
   mode: "question" | "correct" | "grade";
@@ -47,6 +48,13 @@ function detectLooksLikeStatementOnly(lines: { id: number; text: string; kind?: 
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, {
+    bucket: "vision_analyze",
+    limit: 12,
+    windowMs: 5 * 60_000,
+  });
+  if (limited) return limited;
+
   let body: AnalyzePayload;
   try {
     body = await req.json();

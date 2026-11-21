@@ -1,5 +1,5 @@
 "use client";
-import { ReactNode, useState } from "react";
+import { ReactNode, Suspense, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 
@@ -10,7 +10,7 @@ const ROLE_LABELS: Record<string, string> = {
   org_admin: "Administrateur",
 };
 
-export function AccountApprovalGate({ children }: { children: ReactNode }) {
+function AccountApprovalGateInner({ children }: { children: ReactNode }) {
   const { user, loading, refreshProfile, logout } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
@@ -19,6 +19,8 @@ export function AccountApprovalGate({ children }: { children: ReactNode }) {
 
   const isPublicRoute =
     pathname === "/" ||
+    pathname === "/privacy" ||
+    pathname === "/terms" ||
     pathname.startsWith("/auth/") ||
     pathname.startsWith("/spc-admin-gate");
   const isBlocked =
@@ -143,5 +145,13 @@ export function AccountApprovalGate({ children }: { children: ReactNode }) {
         </div>
       </div>
     </div>
+  );
+}
+
+export function AccountApprovalGate({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<>{children}</>}>
+      <AccountApprovalGateInner>{children}</AccountApprovalGateInner>
+    </Suspense>
   );
 }

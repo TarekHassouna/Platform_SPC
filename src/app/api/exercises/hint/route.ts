@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callTextAI } from "@/lib/ai-provider";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 interface HintPayload {
   title?: string;
@@ -10,6 +11,13 @@ interface HintPayload {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, {
+    bucket: "exercises_hint",
+    limit: 20,
+    windowMs: 5 * 60_000,
+  });
+  if (limited) return limited;
+
   let body: HintPayload;
   try {
     body = await req.json();

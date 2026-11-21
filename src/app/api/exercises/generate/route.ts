@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { callTextAI, checkAndIncrementQuota } from "@/lib/ai-provider";
+import { enforceRateLimit } from "@/lib/rate-limit";
 
 interface GeneratePayload {
   userId?: string;
@@ -22,6 +23,13 @@ function detectRequestedCount(prompt: string, explicitCount?: number): number {
 }
 
 export async function POST(req: NextRequest) {
+  const limited = enforceRateLimit(req, {
+    bucket: "exercises_generate",
+    limit: 10,
+    windowMs: 5 * 60_000,
+  });
+  if (limited) return limited;
+
   let payload: GeneratePayload;
   try {
     payload = await req.json();

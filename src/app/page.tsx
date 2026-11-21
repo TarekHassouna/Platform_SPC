@@ -364,10 +364,11 @@ export default function HomePage() {
             <span className="font-bold text-slate-800">SPC Platform</span>
             <span>· Espace pédagogique de Physique-Chimie</span>
           </div>
-          <div className="flex items-center gap-5">
+          <div className="flex items-center gap-5 flex-wrap">
             <Link href="/auth/login" className="hover:text-indigo-600 transition-colors">Connexion</Link>
             <Link href="/auth/signup" className="hover:text-indigo-600 transition-colors">Inscription</Link>
-            <span>Données protégées (RGPD)</span>
+            <Link href="/privacy" className="hover:text-indigo-600 transition-colors">Confidentialité (RGPD)</Link>
+            <Link href="/terms" className="hover:text-indigo-600 transition-colors">CGU</Link>
           </div>
         </div>
       </footer>
