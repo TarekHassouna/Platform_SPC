@@ -138,7 +138,7 @@ export default function TeacherResultsPage() {
     if (res.ok) {
       setGradeNotice({
         ok: true,
-        text: `✅ Note mise à jour (${parsed.toFixed(2)} / ${att.maxScore}) et enregistrée dans Supabase !`,
+        text: `✅ Note mise à jour (${parsed.toFixed(2)} / ${att.maxScore}) et enregistrée !`,
       });
     } else {
       setGradeNotice({

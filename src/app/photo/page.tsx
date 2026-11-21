@@ -539,7 +539,7 @@ function PhotoSubmissionContent() {
                     : ""
                 }`}
               >
-                {uploading ? "⏳ Lecture de ta photo par Gemini Vision…" : cfg.uploadCta}
+                {uploading ? "⏳ Lecture de ta photo en cours…" : cfg.uploadCta}
                 <input
                   type="file"
                   accept="image/*"
@@ -555,7 +555,7 @@ function PhotoSubmissionContent() {
               </label>
 
               <p className="text-[11px] text-slate-400 mt-5">
-                Stockage privé Supabase Storage · Supprimé automatiquement après 90 jours
+                Stockage privé sécurisé · Supprimé automatiquement après 90 jours
               </p>
             </div>
           </div>

@@ -361,7 +361,7 @@ export default function TeacherCreateExercisePage() {
     <TeacherShell>
       <div className="mb-8">
         <div className="inline-flex items-center gap-2 bg-violet-50 text-violet-700 text-xs font-bold px-3 py-1 rounded-full mb-2">
-          ✨ Création assistée par IA · Vérification automatique SymPy + Pint
+          ✨ Création assistée par IA · Vérification mathématique automatique
         </div>
         <h1 className="text-2xl font-extrabold text-slate-900">Créer un exercice en quelques secondes</h1>
         <p className="text-slate-500 mt-1 text-sm">
@@ -491,7 +491,7 @@ export default function TeacherCreateExercisePage() {
                     className="w-full bg-violet-600 text-white text-xs font-bold py-2.5 rounded-xl hover:bg-violet-700 transition-colors disabled:opacity-60"
                   >
                     {isGenerating
-                      ? "⏳ Lecture de la feuille par Gemini Vision…"
+                      ? "⏳ Lecture de la feuille en cours…"
                       : `📸 Extraire cours + ${questionCount} questions depuis cette photo`}
                   </button>
                 </div>
@@ -539,7 +539,7 @@ export default function TeacherCreateExercisePage() {
                   <span className="text-xs text-slate-400">{draft.level} · {draft.domain}</span>
                 </div>
                 <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
-                  {providerUsed === "gemini" ? "✨ Généré par Gemini" : "✓ Modèle structuré"} · {draft.questions.length} question(s)
+                  {providerUsed?.includes("gemini") ? "✨ Généré par l'IA" : "✓ Modèle structuré"} · {draft.questions.length} question(s)
                 </span>
               </div>
 

@@ -91,7 +91,7 @@ export default function ParentDashboard() {
 
       {!linked && (
         <div className="mb-8 bg-amber-50 border border-amber-200 rounded-2xl p-5 text-sm text-amber-900">
-          <strong>Liaison automatique SQL :</strong> dès que {childName} crée son compte élève avec l&apos;e-mail{" "}
+          <strong>Liaison automatique :</strong> dès que {childName} crée son compte élève avec l&apos;e-mail{" "}
           <code className="font-mono bg-white px-1.5 py-0.5 rounded">
             {childEmail || "configuré dans Paramètres"}
           </code>

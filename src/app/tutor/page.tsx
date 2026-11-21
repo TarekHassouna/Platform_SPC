@@ -281,11 +281,6 @@ export default function StudentTutorPage() {
               </div>
               <div className="text-xs text-slate-400">
                 Mode {mode === "guide" ? "Guidé (indices progressifs)" : mode === "explain" ? "Explication de cours" : "Quiz rapide"}
-                {providerBadge && (
-                  <span className="ml-2 font-mono text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
-                    {providerBadge}
-                  </span>
-                )}
               </div>
             </div>
             {photoContext ? (

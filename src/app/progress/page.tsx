@@ -223,7 +223,7 @@ export default function ProgressPage() {
 
         {loading ? (
           <div className="bg-white rounded-3xl border border-slate-100 p-10 text-center text-sm text-slate-400">
-            Chargement de tes résultats réels depuis Supabase…
+            Chargement de tes résultats…
           </div>
         ) : realSkills.length === 0 ? (
           <div className="bg-white rounded-3xl border border-slate-100 p-12 text-center space-y-3 shadow-xs">

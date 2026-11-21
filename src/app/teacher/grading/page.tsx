@@ -101,7 +101,7 @@ export default function TeacherGradingPage() {
           .map((l: { text: string }) => l.text)
           .join("\n");
         onResult(text);
-        showToast("✅ Corrigé papier lu par Gemini Vision ! Vérifie et enregistre.");
+        showToast("✅ Corrigé papier lu par l'IA ! Vérifie et enregistre.");
       } else {
         showToast(`⚠️ ${data.error || "Impossible de lire la photo du corrigé."}`);
       }
@@ -567,7 +567,7 @@ export default function TeacherGradingPage() {
 
                 <div className="flex items-center justify-between pt-2">
                   <span className="text-xs text-slate-500">
-                    La note finale est enregistrée dans Supabase et mise à jour sur la fiche de l&apos;élève.
+                    La note finale est enregistrée et mise à jour sur la fiche de l&apos;élève.
                   </span>
                   <button
                     onClick={handlePublishGrade}

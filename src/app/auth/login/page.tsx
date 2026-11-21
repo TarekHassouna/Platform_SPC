@@ -12,7 +12,7 @@ const DEMO_ACCOUNTS = [
 ];
 
 function LoginContent() {
-  const { loginWithPassword, loginWithGoogle, authMode } = useAuth();
+  const { loginWithPassword, loginWithGoogle } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next");
@@ -66,17 +66,8 @@ function LoginContent() {
             S
           </Link>
           <h1 className="text-2xl font-extrabold text-slate-900">Connexion sécurisée</h1>
-          <p className="text-slate-500 mt-1 text-sm flex items-center justify-center gap-2">
-            <span>Votre espace est détecté automatiquement</span>
-            <span
-              className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                authMode === "supabase"
-                  ? "bg-emerald-100 text-emerald-700"
-                  : "bg-amber-100 text-amber-800"
-              }`}
-            >
-              {authMode === "supabase" ? "● Supabase Auth + SQL" : "● Mode local"}
-            </span>
+          <p className="text-slate-500 mt-1 text-sm">
+            Votre espace est détecté automatiquement
           </p>
         </div>
 

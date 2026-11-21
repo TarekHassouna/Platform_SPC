@@ -92,7 +92,7 @@ export default function TeacherDashboard() {
           <button
             onClick={() => refresh()}
             className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-600 font-semibold px-3.5 py-2.5 rounded-xl hover:border-indigo-300 hover:text-indigo-600 transition-colors text-xs"
-            title="Actualiser depuis Supabase"
+            title="Actualiser"
           >
             {loading ? "⏳" : "🔄"} Actualiser
           </button>

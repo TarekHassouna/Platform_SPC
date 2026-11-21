@@ -483,7 +483,7 @@ function ExerciseRunnerContent() {
   if (loadingDb) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-500">
-        Chargement de l&apos;exercice depuis Supabase…
+        Chargement de l&apos;exercice…
       </div>
     );
   }
@@ -838,11 +838,11 @@ function ExerciseRunnerContent() {
               <span>
                 Note : <strong className="text-slate-900">{totalScore.toFixed(2)} / {activeExercise.questions.length}</strong>
                 {savedToDb && (
-                  <span className="ml-2 text-emerald-600 font-semibold">✓ Enregistré dans Supabase</span>
+                  <span className="ml-2 text-emerald-600 font-semibold">✓ Enregistré</span>
                 )}
               </span>
               <span className="bg-white border border-slate-200 px-2.5 py-1 rounded-full font-mono">
-                {engineUsed === "sympy_pint" ? "🐍 SymPy + Pint" : engineUsed?.startsWith("ai_rubric") ? "🤖 Barème IA" : "⚡ Évaluateur SPC"}
+                {engineUsed === "sympy_pint" ? "⚡ Moteur scientifique" : engineUsed?.startsWith("ai_rubric") ? "🤖 Barème IA" : "⚡ Évaluateur SPC"}
               </span>
             </div>
           )}

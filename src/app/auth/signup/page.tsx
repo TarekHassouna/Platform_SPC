@@ -26,7 +26,7 @@ function getPasswordChecks(pwd: string) {
 }
 
 export default function SignupPage() {
-  const { signupWithEmail, loginWithGoogle, authMode } = useAuth();
+  const { signupWithEmail, loginWithGoogle } = useAuth();
   const router = useRouter();
   const [role, setRole] = useState<UserRole>("student");
   const [error, setError] = useState<string | null>(null);
@@ -190,17 +190,8 @@ export default function SignupPage() {
             S
           </Link>
           <h1 className="text-2xl font-extrabold text-slate-900">Créer un compte</h1>
-          <p className="text-slate-500 mt-1 text-sm flex items-center justify-center gap-2">
-            <span>Espace pédagogique Physique-Chimie</span>
-            <span
-              className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                authMode === "supabase"
-                  ? "bg-emerald-100 text-emerald-700"
-                  : "bg-amber-100 text-amber-800"
-              }`}
-            >
-              {authMode === "supabase" ? "● Supabase Auth + SQL" : "● Mode local"}
-            </span>
+          <p className="text-slate-500 mt-1 text-sm">
+            Espace pédagogique Physique-Chimie
           </p>
         </div>
 
@@ -364,7 +355,7 @@ export default function SignupPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    E-mail de l&apos;enfant <span className="text-slate-400 font-normal">(liaison automatique SQL)</span>
+                    E-mail de l&apos;enfant <span className="text-slate-400 font-normal">(liaison automatique)</span>
                   </label>
                   <input
                     type="email"
@@ -512,7 +503,7 @@ export default function SignupPage() {
               disabled={submitting}
               className="w-full text-center bg-indigo-600 text-white font-bold py-3.5 rounded-xl hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-60"
             >
-              {submitting ? "Création du compte & liaison SQL…" : ctaLabel}
+              {submitting ? "Création du compte…" : ctaLabel}
             </button>
           </form>
 
