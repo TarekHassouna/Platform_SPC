@@ -48,7 +48,7 @@ interface AuthContextType {
   authMode: "supabase" | "local";
   loginWithPassword: (email: string, password: string) => Promise<AuthActionResult>;
   signupWithEmail: (profile: UserProfile, password: string) => Promise<AuthActionResult>;
-  loginWithGoogle: () => Promise<AuthActionResult>;
+  loginWithGoogle: (preferredRole?: UserRole) => Promise<AuthActionResult>;
   sendPasswordReset: (email: string) => Promise<AuthActionResult>;
   updatePassword: (newPassword: string) => Promise<AuthActionResult>;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
@@ -313,7 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { ok: true, profile: match.profile, mode: "local" };
   };
 
-  const loginWithGoogle = async (): Promise<AuthActionResult> => {
+  const loginWithGoogle = async (preferredRole?: UserRole): Promise<AuthActionResult> => {
     const supabase = getSupabaseBrowserClient();
     if (!isSupabaseConfigured || !supabase) {
       return {
@@ -324,9 +324,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
     }
     const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const callbackUrl = preferredRole
+      ? `${origin}/auth/callback?role=${encodeURIComponent(preferredRole)}`
+      : `${origin}/auth/callback`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${origin}/auth/callback` },
+      options: { redirectTo: callbackUrl },
     });
     if (error) return { ok: false, error: error.message, mode: "supabase" };
     return { ok: true, mode: "supabase" };

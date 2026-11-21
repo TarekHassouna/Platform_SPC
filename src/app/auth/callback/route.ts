@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
+const ALLOWED_ROLES = new Set(["student", "teacher", "parent", "org_admin"]);
+
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next");
+  const requestedRole = searchParams.get("role");
+  const oauthError = searchParams.get("error_description") || searchParams.get("error");
+
+  if (oauthError) {
+    return NextResponse.redirect(
+      `${origin}/auth/login?error=${encodeURIComponent(oauthError)}`
+    );
+  }
 
   const supabase = await getSupabaseServerClient();
   if (!supabase || !code) {
@@ -22,7 +32,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}${next}`);
   }
 
-  // Resolve real role from relational profiles table
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -34,7 +43,18 @@ export async function GET(request: NextRequest) {
       .eq("id", user.id)
       .maybeSingle();
 
-    const role = profile?.default_role || user.user_metadata?.role || "student";
+    let role = profile?.default_role || user.user_metadata?.role || "student";
+
+    // If the user explicitly picked a role on /auth/signup before clicking "S'inscrire avec Google"
+    if (requestedRole && ALLOWED_ROLES.has(requestedRole) && role === "student" && requestedRole !== "student") {
+      await supabase
+        .from("profiles")
+        .update({ default_role: requestedRole })
+        .eq("id", user.id);
+      await supabase.auth.updateUser({ data: { role: requestedRole } });
+      role = requestedRole;
+    }
+
     if (role === "teacher") return NextResponse.redirect(`${origin}/teacher/dashboard`);
     if (role === "parent") return NextResponse.redirect(`${origin}/parent/dashboard`);
     if (role === "org_admin") return NextResponse.redirect(`${origin}/org/dashboard`);

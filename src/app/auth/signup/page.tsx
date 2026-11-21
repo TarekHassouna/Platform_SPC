@@ -528,7 +528,7 @@ export default function SignupPage() {
           <button
             type="button"
             onClick={async () => {
-              const res = await loginWithGoogle();
+              const res = await loginWithGoogle(role);
               if (!res.ok && res.error) setError(res.error);
             }}
             className="w-full flex items-center justify-center gap-3 border border-slate-200 rounded-xl py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
