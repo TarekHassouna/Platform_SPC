@@ -4,13 +4,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useAuth, getDashboardPathForRole } from "@/lib/auth-context";
 
-const DEMO_ACCOUNTS = [
-  { label: "🎓 Élève (Amira)", email: "eleve@demo.fr", password: "Password123!" },
-  { label: "👨‍🏫 Enseignant (Sondos)", email: "prof@demo.fr", password: "Password123!" },
-  { label: "👪 Parent (Ahmed)", email: "parent@demo.fr", password: "Password123!" },
-  { label: "🏛️ Admin Étab.", email: "admin@demo.fr", password: "Password123!" },
-];
-
 function LoginContent() {
   const { loginWithPassword, loginWithGoogle } = useAuth();
   const router = useRouter();
@@ -151,31 +144,6 @@ function LoginContent() {
               {submitting ? "Vérification en cours…" : "Se connecter"}
             </button>
           </form>
-
-          {/* Local-only quick fill helper for testing seeded accounts */}
-          {authMode === "local" && (
-            <div className="mt-6 pt-5 border-t border-slate-100">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5">
-                Comptes démo pré-enregistrés (mot de passe : Password123!)
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {DEMO_ACCOUNTS.map((acc) => (
-                  <button
-                    key={acc.email}
-                    type="button"
-                    onClick={() => {
-                      setEmail(acc.email);
-                      setPassword(acc.password);
-                      setError(null);
-                    }}
-                    className="text-left text-xs font-semibold bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 border border-slate-200 rounded-xl px-3 py-2 transition-colors truncate"
-                  >
-                    {acc.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           <p className="text-center text-sm text-slate-500 mt-6">
             Pas encore de compte ?{" "}
