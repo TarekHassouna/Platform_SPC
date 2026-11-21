@@ -1,7 +1,13 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ParentShell } from "@/components/ParentShell";
 import { useAuth } from "@/lib/auth-context";
+import {
+  fetchParentChildrenDashboards,
+  linkParentToChild,
+  unlinkParentChild,
+  type ParentChildSnapshot,
+} from "@/lib/db";
 
 const inputCls =
   "w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
@@ -12,29 +18,101 @@ export default function ParentSettingsPage() {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
-  const [childName, setChildName] = useState("");
-  const [childLevel, setChildLevel] = useState("Terminale");
 
-  const [weeklyReport, setWeeklyReport] = useState(true);
-  const [weaknessAlert, setWeaknessAlert] = useState(true);
-  const [photoRetention, setPhotoRetention] = useState("90");
+  const [childrenList, setChildrenList] = useState<ParentChildSnapshot[]>([]);
+  const [newChildEmail, setNewChildEmail] = useState("");
+  const [newChildName, setNewChildName] = useState("");
+  const [newChildLevel, setNewChildLevel] = useState("Terminale");
+  const [linking, setLinking] = useState(false);
+
   const [savedToast, setSavedToast] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setSavedToast(msg);
+    setTimeout(() => setSavedToast(null), 3500);
+  };
+
+  const loadChildren = useCallback(async () => {
+    if (!user?.id) return;
+    const list = await fetchParentChildrenDashboards(user.id);
+    setChildrenList(list);
+  }, [user?.id]);
 
   useEffect(() => {
     if (user) {
       setFirstName(user.firstName || "");
       setLastName(user.lastName || "");
       setEmail(user.email || "");
-      setChildName(user.childName || "Amira");
-      setChildLevel(user.childLevel || "Terminale");
     }
-  }, [user]);
+    loadChildren();
+  }, [user, loadChildren]);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateProfile({ firstName, lastName, email, childName, childLevel });
-    setSavedToast("✅ Paramètres enregistrés !");
-    setTimeout(() => setSavedToast(null), 3000);
+    await updateProfile({ firstName, lastName, email });
+    showToast("✅ Profil parent mis à jour !");
+  };
+
+  const handleAddChild = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newChildEmail.trim()) return;
+    setLinking(true);
+    const res = await linkParentToChild({
+      childEmail: newChildEmail.trim(),
+      childName: newChildName.trim() || undefined,
+      childLevel: newChildLevel,
+    });
+    setLinking(false);
+    if (!res.ok) {
+      showToast(`⚠️ ${res.error || "Erreur lors du rattachement."}`);
+      return;
+    }
+    setNewChildEmail("");
+    setNewChildName("");
+    showToast(
+      res.linked
+        ? `✅ ${res.childName || "Enfant"} rattaché instantanément !`
+        : "⏳ Invitation enregistrée — liaison automatique à l'inscription de l'élève."
+    );
+    await loadChildren();
+  };
+
+  const handleUnlink = async (linkId: string, name: string) => {
+    const ok = await unlinkParentChild(linkId);
+    if (ok) {
+      setChildrenList((prev) => prev.filter((c) => c.linkId !== linkId));
+      showToast(`Lien supprimé pour ${name}.`);
+    }
+  };
+
+  const handleRealGdprExport = () => {
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      parent: {
+        firstName,
+        lastName,
+        email,
+      },
+      children: childrenList.map((c) => ({
+        name: c.childName,
+        email: c.childEmail,
+        level: c.childLevel,
+        linked: c.linked,
+        classes: c.enrolledClasses.map((cl) => cl.name),
+        submissionsCount: c.recentSubmissions.length,
+        submissions: c.recentSubmissions,
+      })),
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `spc-export-parent-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast("📦 Export JSON réel téléchargé !");
   };
 
   return (
@@ -46,80 +124,146 @@ export default function ParentSettingsPage() {
       )}
 
       <div className="mb-8">
-        <h1 className="text-2xl font-extrabold text-slate-900">⚙️ Paramètres &amp; RGPD</h1>
+        <h1 className="text-2xl font-extrabold text-slate-900">⚙️ Paramètres &amp; Enfants rattachés</h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Modifiez vos coordonnées, les informations de votre enfant, vos préférences de suivi et la protection des données.
+          Gérez vos coordonnées, rattachez vos enfants par e-mail et téléchargez vos données réelles (RGPD).
         </p>
       </div>
 
-      <form onSubmit={handleSave} className="space-y-6 max-w-3xl">
-        {/* Account & Child Info */}
-        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-4">
-          <h2 className="font-bold text-slate-900 text-base">Informations du compte</h2>
+      <div className="space-y-6 max-w-3xl">
+        {/* Parent Account */}
+        <form
+          onSubmit={handleSaveProfile}
+          className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-4"
+        >
+          <h2 className="font-bold text-slate-900 text-base">Informations du compte parent</h2>
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">Prénom</label>
-              <input type="text" value={firstName} onChange={(e) => setFirstName(e.target.value)} className={inputCls} />
+              <input
+                type="text"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                className={inputCls}
+              />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">Nom</label>
-              <input type="text" value={lastName} onChange={(e) => setLastName(e.target.value)} className={inputCls} />
+              <input
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                className={inputCls}
+              />
             </div>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">Adresse e-mail</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} />
+            <input
+              type="email"
+              value={email}
+              disabled
+              className={`${inputCls} bg-slate-50 text-slate-500 cursor-not-allowed`}
+            />
           </div>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              className="bg-indigo-600 text-white font-bold px-6 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors text-xs"
+            >
+              Enregistrer mon profil
+            </button>
+          </div>
+        </form>
 
-          <hr className="border-slate-100 my-2" />
-          <h3 className="font-bold text-slate-900 text-sm">Enfant rattaché</h3>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">Prénom de l&apos;enfant</label>
-              <input type="text" value={childName} onChange={(e) => setChildName(e.target.value)} className={inputCls} />
+        {/* Linked Children Management */}
+        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-4">
+          <h2 className="font-bold text-slate-900 text-base">
+            👨‍👩‍👧 Enfants rattachés ({childrenList.length})
+          </h2>
+
+          {childrenList.length === 0 ? (
+            <p className="text-xs text-slate-400">
+              Aucun enfant rattaché pour le moment. Utilisez le formulaire ci-dessous avec l&apos;adresse e-mail de votre enfant.
+            </p>
+          ) : (
+            <div className="space-y-2.5">
+              {childrenList.map((c) => (
+                <div
+                  key={c.linkId}
+                  className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap"
+                >
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-bold text-sm text-slate-900">{c.childName}</span>
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                          c.linked
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {c.linked ? "● Lié" : "⏳ En attente"}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {c.childEmail || "Pas d'e-mail"} · {c.childLevel}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleUnlink(c.linkId, c.childName)}
+                    className="text-xs font-semibold text-rose-600 hover:bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200"
+                  >
+                    Retirer
+                  </button>
+                </div>
+              ))}
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">Niveau scolaire</label>
-              <select value={childLevel} onChange={(e) => setChildLevel(e.target.value)} className={inputCls}>
+          )}
+
+          <form onSubmit={handleAddChild} className="pt-3 border-t border-slate-100 space-y-3">
+            <div className="text-xs font-bold text-slate-700">Rattacher un enfant par e-mail</div>
+            <div className="grid sm:grid-cols-3 gap-3">
+              <input
+                type="email"
+                required
+                value={newChildEmail}
+                onChange={(e) => setNewChildEmail(e.target.value)}
+                placeholder="E-mail élève *"
+                className={inputCls}
+              />
+              <input
+                type="text"
+                value={newChildName}
+                onChange={(e) => setNewChildName(e.target.value)}
+                placeholder="Prénom (optionnel)"
+                className={inputCls}
+              />
+              <select
+                value={newChildLevel}
+                onChange={(e) => setNewChildLevel(e.target.value)}
+                className={inputCls}
+              >
                 <option value="Seconde">Seconde</option>
                 <option value="Première">Première</option>
                 <option value="Terminale">Terminale</option>
               </select>
             </div>
-          </div>
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                disabled={linking}
+                className="bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl hover:bg-emerald-700 text-xs disabled:opacity-60"
+              >
+                {linking ? "⏳ Liaison…" : "+ Rattacher cet enfant"}
+              </button>
+            </div>
+          </form>
         </div>
 
-        {/* Notifications */}
-        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-4">
-          <h2 className="font-bold text-slate-900 text-base">Notifications par e-mail</h2>
-          <label className="flex items-center justify-between gap-4 cursor-pointer">
-            <div>
-              <div className="text-sm font-semibold text-slate-800">Résumé hebdomadaire (chaque dimanche)</div>
-              <div className="text-xs text-slate-500">Temps de travail, compétences acquises et prochaines révisions</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={weeklyReport}
-              onChange={(e) => setWeeklyReport(e.target.checked)}
-              className="w-5 h-5 accent-indigo-600"
-            />
-          </label>
-          <label className="flex items-center justify-between gap-4 cursor-pointer pt-2 border-t border-slate-50">
-            <div>
-              <div className="text-sm font-semibold text-slate-800">Alertes de lacunes récurrentes</div>
-              <div className="text-xs text-slate-500">Être prévenu si une compétence bloque plusieurs fois de suite</div>
-            </div>
-            <input
-              type="checkbox"
-              checked={weaknessAlert}
-              onChange={(e) => setWeaknessAlert(e.target.checked)}
-              className="w-5 h-5 accent-indigo-600"
-            />
-          </label>
-        </div>
-
-        {/* GDPR & Minor Privacy (Vision Doc §14) */}
-        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-4">
+        {/* Real GDPR Export */}
+        <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-slate-900 text-base">🛡️ Protection des données (RGPD Mineurs)</h2>
             <span className="text-xs font-bold bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full">
@@ -127,45 +271,19 @@ export default function ParentSettingsPage() {
             </span>
           </div>
           <p className="text-xs text-slate-500 leading-relaxed">
-            Les photos de copies de votre enfant sont stockées dans un espace privé chiffré, accessibles uniquement par liens temporaires et jamais utilisées pour entraîner des modèles d&apos;IA.
+            Les photos de copies de votre enfant sont stockées dans un espace privé chiffré et supprimées automatiquement après 90 jours. Les discussions avec le Tuteur IA restent strictement privées à l&apos;élève.
           </p>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 rounded-2xl p-4">
-            <div>
-              <div className="text-sm font-semibold text-slate-800">Suppression automatique des photos</div>
-              <div className="text-xs text-slate-500">Délai maximal de conservation des feuilles photographiées</div>
-            </div>
-            <select
-              value={photoRetention}
-              onChange={(e) => setPhotoRetention(e.target.value)}
-              className="border border-slate-200 rounded-xl px-3 py-2 text-sm text-slate-900 bg-white"
-            >
-              <option value="30">30 jours</option>
-              <option value="90">90 jours (recommandé)</option>
-            </select>
-          </div>
-          <div className="flex flex-wrap gap-3 pt-1">
+          <div>
             <button
               type="button"
-              onClick={() => {
-                setSavedToast("📦 Export RGPD des données envoyé à votre adresse e-mail.");
-                setTimeout(() => setSavedToast(null), 3500);
-              }}
-              className="text-xs font-semibold border border-slate-200 text-slate-700 px-4 py-2 rounded-xl hover:bg-slate-50"
+              onClick={handleRealGdprExport}
+              className="text-xs font-bold border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl hover:bg-slate-50"
             >
-              Exporter les données (RGPD)
+              📥 Télécharger l&apos;export réel des données (JSON)
             </button>
           </div>
         </div>
-
-        <div className="flex justify-end">
-          <button
-            type="submit"
-            className="bg-indigo-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100 text-sm"
-          >
-            Enregistrer les modifications
-          </button>
-        </div>
-      </form>
+      </div>
     </ParentShell>
   );
 }

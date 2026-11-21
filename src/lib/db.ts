@@ -180,16 +180,36 @@ export async function completeRelationalOnboarding(
     }
   }
 
-  if (profile.role === "parent" && profile.childName?.trim()) {
-    const { error } = await supabase.from("parent_child_links").insert({
-      parent_id: userId,
-      invited_child_name: profile.childName.trim(),
-      invited_child_email: profile.childEmail?.trim() || null,
-      invited_child_level: profile.childLevel || null,
-      status: "pending",
-      parental_consent_given: true,
-    });
-    if (error) warnings.push("Lien parent-enfant en attente de synchronisation.");
+  if (profile.role === "parent" && (profile.childEmail?.trim() || profile.childName?.trim())) {
+    if (profile.childEmail?.trim()) {
+      const linkedRes = await linkParentToChild({
+        childEmail: profile.childEmail.trim(),
+        childName: profile.childName?.trim(),
+        childLevel: profile.childLevel,
+      });
+      if (!linkedRes.ok) {
+        // Fallback insert if link_parent_to_child_by_email RPC hasn't been executed yet
+        const { error } = await supabase.from("parent_child_links").insert({
+          parent_id: userId,
+          invited_child_name: profile.childName?.trim() || profile.childEmail.split("@")[0],
+          invited_child_email: profile.childEmail.trim().toLowerCase(),
+          invited_child_level: profile.childLevel || null,
+          status: "pending",
+          parental_consent_given: true,
+        });
+        if (error) warnings.push("Lien parent-enfant en attente de synchronisation.");
+      }
+    } else if (profile.childName?.trim()) {
+      const { error } = await supabase.from("parent_child_links").insert({
+        parent_id: userId,
+        invited_child_name: profile.childName.trim(),
+        invited_child_email: null,
+        invited_child_level: profile.childLevel || null,
+        status: "pending",
+        parental_consent_given: true,
+      });
+      if (error) warnings.push("Lien parent-enfant en attente de synchronisation.");
+    }
   }
 
   if (profile.role === "org_admin" && profile.school?.trim()) {
@@ -551,8 +571,134 @@ export async function recordExerciseSubmission(params: {
   }
 }
 
+export interface ParentChildSnapshot {
+  linkId: string;
+  linked: boolean;
+  studentId?: string;
+  childName: string;
+  childLevel: string;
+  childEmail: string;
+  enrolledClasses: EnrolledClassRow[];
+  assignments: ClassAssignmentRow[];
+  mastery: MasteryRow[];
+  recentSubmissions: SubmissionHistoryRow[];
+}
+
 /**
- * Fetches linked child progress for Parent Dashboard via parent_child_links
+ * Links the currently logged-in parent to a student account by email.
+ * Instant link if the student already exists; creates a pending auto-link if they sign up later.
+ */
+export async function linkParentToChild(params: {
+  childEmail: string;
+  childName?: string;
+  childLevel?: string;
+}): Promise<{
+  ok: boolean;
+  linked?: boolean;
+  childName?: string;
+  error?: string;
+}> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, error: "Connexion à la base indisponible." };
+  }
+  const email = params.childEmail.trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    return { ok: false, error: "Veuillez entrer une adresse e-mail valide pour votre enfant." };
+  }
+
+  const { data, error } = await supabase.rpc("link_parent_to_child_by_email", {
+    p_child_email: email,
+    p_child_name: params.childName?.trim() || null,
+    p_child_level: params.childLevel || null,
+  });
+
+  if (error) {
+    if (error.message.includes("link_parent_to_child_by_email")) {
+      return {
+        ok: false,
+        error:
+          "Fonction de liaison non activée : exécutez supabase/parent_link.sql dans Supabase SQL Editor.",
+      };
+    }
+    return { ok: false, error: error.message };
+  }
+
+  if (data && !data.ok) {
+    return { ok: false, error: data.error || "Impossible de rattacher cet enfant." };
+  }
+
+  return {
+    ok: true,
+    linked: Boolean(data?.linked),
+    childName: data?.child_name ? String(data.child_name) : params.childName,
+  };
+}
+
+/**
+ * Removes a parent-child link row owned by the logged-in parent.
+ */
+export async function unlinkParentChild(linkId: string): Promise<boolean> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase || !linkId) return false;
+  const { error } = await supabase.from("parent_child_links").delete().eq("id", linkId);
+  return !error;
+}
+
+/**
+ * Fetches ALL linked & pending children + their full real progress (classes, assignments, mastery, submissions)
+ */
+export async function fetchParentChildrenDashboards(
+  parentId: string
+): Promise<ParentChildSnapshot[]> {
+  const supabase = getSupabaseBrowserClient();
+  if (!isSupabaseConfigured || !supabase || !parentId || parentId.startsWith("local-") || parentId.startsWith("demo-")) {
+    return [];
+  }
+
+  const { data: links } = await supabase
+    .from("parent_child_links")
+    .select("id, student_id, invited_child_name, invited_child_email, invited_child_level, status")
+    .eq("parent_id", parentId)
+    .order("created_at", { ascending: true });
+
+  if (!links || links.length === 0) return [];
+
+  const snapshots = await Promise.all(
+    links.map(async (link: Record<string, unknown>): Promise<ParentChildSnapshot> => {
+      const studentId = link.student_id ? String(link.student_id) : undefined;
+      const base: ParentChildSnapshot = {
+        linkId: String(link.id),
+        linked: Boolean(studentId && link.status === "linked"),
+        studentId,
+        childName: String(link.invited_child_name || "Votre enfant"),
+        childLevel: String(link.invited_child_level || "Lycée"),
+        childEmail: String(link.invited_child_email || ""),
+        enrolledClasses: [],
+        assignments: [],
+        mastery: [],
+        recentSubmissions: [],
+      };
+
+      if (!studentId) return base;
+
+      const childData = await fetchStudentDashboardData(studentId);
+      return {
+        ...base,
+        linked: true,
+        enrolledClasses: childData.enrolledClasses,
+        assignments: childData.assignments,
+        mastery: childData.mastery,
+        recentSubmissions: childData.recentSubmissions,
+      };
+    })
+  );
+
+  return snapshots;
+}
+
+/**
+ * Fetches first linked child progress for Parent Dashboard via parent_child_links
  */
 export async function fetchParentChildDashboard(parentId: string): Promise<{
   linked: boolean;
@@ -562,38 +708,16 @@ export async function fetchParentChildDashboard(parentId: string): Promise<{
   mastery: MasteryRow[];
   recentSubmissions: SubmissionHistoryRow[];
 }> {
-  const supabase = getSupabaseBrowserClient();
-  if (!isSupabaseConfigured || !supabase || !parentId || parentId.startsWith("local-") || parentId.startsWith("demo-")) {
-    return { linked: false, mastery: [], recentSubmissions: [] };
-  }
-
-  const { data: link } = await supabase
-    .from("parent_child_links")
-    .select("student_id, invited_child_name, invited_child_email, invited_child_level, status")
-    .eq("parent_id", parentId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!link) return { linked: false, mastery: [], recentSubmissions: [] };
-  if (!link.student_id) {
-    return {
-      linked: false,
-      childName: link.invited_child_name,
-      childLevel: link.invited_child_level || undefined,
-      childEmail: link.invited_child_email || undefined,
-      mastery: [],
-      recentSubmissions: [],
-    };
-  }
-
-  const childData = await fetchStudentDashboardData(link.student_id);
+  const list = await fetchParentChildrenDashboards(parentId);
+  const first = list[0];
+  if (!first) return { linked: false, mastery: [], recentSubmissions: [] };
   return {
-    linked: true,
-    childName: link.invited_child_name,
-    childLevel: link.invited_child_level || undefined,
-    childEmail: link.invited_child_email || undefined,
-    mastery: childData.mastery,
-    recentSubmissions: childData.recentSubmissions,
+    linked: first.linked,
+    childName: first.childName,
+    childLevel: first.childLevel,
+    childEmail: first.childEmail,
+    mastery: first.mastery,
+    recentSubmissions: first.recentSubmissions,
   };
 }
 
