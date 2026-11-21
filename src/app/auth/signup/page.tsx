@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth, UserRole, getDashboardPathForRole } from "@/lib/auth-context";
+import { BrandLogo } from "@/components/BrandLogo";
 
 const roles = [
   { label: "Élève", icon: "🎓", value: "student" as UserRole, hint: "Seconde à Terminale" },
@@ -178,11 +179,8 @@ export default function SignupPage() {
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-violet-50 flex items-center justify-center p-6">
       <div className="w-full max-w-lg">
         <div className="text-center mb-7">
-          <Link
-            href="/"
-            className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-2xl font-extrabold shadow-xl mb-4"
-          >
-            S
+          <Link href="/" className="inline-flex items-center justify-center mb-4">
+            <BrandLogo size="lg" className="shadow-xl rounded-2xl" />
           </Link>
           <h1 className="text-2xl font-extrabold text-slate-900">Créer un compte</h1>
           <p className="text-slate-500 mt-1 text-sm">

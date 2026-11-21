@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { BrandLogo } from "@/components/BrandLogo";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -179,10 +180,8 @@ export default function DashboardPage() {
       {/* SIDEBAR */}
       <aside className="hidden lg:flex flex-col w-64 bg-white border-r border-slate-100 fixed inset-y-0">
         <div className="p-6 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm">
-              S
-            </div>
+          <div className="flex items-center gap-2.5">
+            <BrandLogo size="sm" />
             <div>
               <span className="font-bold text-slate-900 block leading-tight">SPC Platform</span>
               <span className="text-[11px] font-medium text-indigo-600">Espace Élève</span>

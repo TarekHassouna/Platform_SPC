@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 
 export const metadata: Metadata = {
   title: "Conditions Générales d'Utilisation (CGU) — Platform SPC",
@@ -13,9 +14,7 @@ export default function TermsPage() {
       <header className="bg-white border-b border-slate-100 px-6 py-4">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 font-extrabold text-slate-900">
-            <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-white flex items-center justify-center text-sm">
-              S
-            </span>
+            <BrandLogo size="sm" />
             <span>Platform SPC</span>
           </Link>
           <Link

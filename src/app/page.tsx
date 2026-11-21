@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 
 type ExampleTab = "formula" | "units" | "photo";
 
@@ -93,9 +94,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-100">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-extrabold text-sm shadow-sm">
-              S
-            </div>
+            <BrandLogo size="md" className="shadow-sm rounded-xl" />
             <div className="leading-tight">
               <span className="font-extrabold text-slate-900 text-base block">SPC Platform</span>
               <span className="text-[11px] font-medium text-slate-500">
@@ -358,9 +357,7 @@ export default function HomePage() {
       <footer className="py-8 px-6 bg-slate-50 border-t border-slate-100 text-slate-500 text-xs">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold text-xs">
-              S
-            </div>
+            <BrandLogo size="xs" />
             <span className="font-bold text-slate-800">SPC Platform</span>
             <span>· Espace pédagogique de Physique-Chimie</span>
           </div>

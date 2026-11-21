@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useOrgStore } from "@/lib/org-store";
+import { BrandLogo } from "@/components/BrandLogo";
 
 export function OrgShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
@@ -88,9 +89,7 @@ export function OrgShell({ children }: { children: ReactNode }) {
     <>
       <div className="p-5 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-800 to-indigo-700 flex items-center justify-center text-white font-extrabold text-sm shadow-sm">
-            S
-          </div>
+          <BrandLogo size="md" className="shadow-sm rounded-xl" />
           <div className="min-w-0">
             <span className="font-bold text-slate-900 block leading-tight truncate">
               {schoolTitle}

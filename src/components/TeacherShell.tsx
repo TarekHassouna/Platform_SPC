@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useTeacherStore, Level } from "@/lib/teacher-store";
+import { BrandLogo } from "@/components/BrandLogo";
 
 interface TeacherShellProps {
   children: ReactNode;
@@ -67,9 +68,7 @@ export function TeacherShell({ children }: TeacherShellProps) {
     <>
       <div className="p-5 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-extrabold text-sm shadow-sm">
-            S
-          </div>
+          <BrandLogo size="md" className="shadow-sm rounded-xl" />
           <div>
             <span className="font-bold text-slate-900 block leading-tight">SPC Platform</span>
             <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">

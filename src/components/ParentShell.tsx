@@ -3,6 +3,7 @@ import { ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { BrandLogo } from "@/components/BrandLogo";
 
 export function ParentShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
@@ -35,9 +36,7 @@ export function ParentShell({ children }: { children: ReactNode }) {
     <>
       <div className="p-6 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-sm">
-            S
-          </div>
+          <BrandLogo size="sm" />
           <div>
             <span className="font-bold text-slate-900 block leading-tight">SPC Platform</span>
             <span className="text-[11px] font-semibold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full">
