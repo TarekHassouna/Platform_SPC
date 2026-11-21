@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useAuth, getDashboardPathForRole } from "@/lib/auth-context";
 
 function LoginContent() {
-  const { loginWithPassword, loginWithGoogle } = useAuth();
+  const { loginWithPassword, loginWithGoogle, logout } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next");
@@ -34,7 +34,14 @@ function LoginContent() {
       return;
     }
 
-    if (nextPath && nextPath.startsWith("/")) {
+    // Security: Admin accounts can NEVER sign in through the public login page
+    if (res.profile.role === "org_admin") {
+      await logout();
+      setError("Adresse e-mail ou mot de passe incorrect.");
+      return;
+    }
+
+    if (nextPath && nextPath.startsWith("/") && !nextPath.startsWith("/org")) {
       router.push(nextPath);
       return;
     }

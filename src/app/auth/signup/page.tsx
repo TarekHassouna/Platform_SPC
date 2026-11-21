@@ -8,7 +8,6 @@ const roles = [
   { label: "Élève", icon: "🎓", value: "student" as UserRole, hint: "Seconde à Terminale" },
   { label: "Enseignant", icon: "👨‍🏫", value: "teacher" as UserRole, hint: "Professeur ou tuteur" },
   { label: "Parent", icon: "👪", value: "parent" as UserRole, hint: "Suivi pédagogique" },
-  { label: "Administrateur", icon: "🏛️", value: "org_admin" as UserRole, hint: "Direction & validations" },
 ];
 
 const inputClass =
@@ -198,10 +197,10 @@ export default function SignupPage() {
             </div>
           )}
 
-          {/* Role selector */}
+            {/* Role selector */}
           <div className="mb-6">
             <label className="block text-sm font-semibold text-slate-700 mb-2.5">Je suis…</label>
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-3 gap-2.5">
               {roles.map((r) => (
                 <button
                   key={r.value}
@@ -345,25 +344,9 @@ export default function SignupPage() {
               </div>
             )}
 
-            {/* ORG ADMIN relational fields */}
-            {role === "org_admin" && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Nom de l&apos;établissement *</label>
-                <input
-                  type="text"
-                  placeholder="Mon établissement scolaire"
-                  className={inputClass}
-                  value={form.school}
-                  onChange={(e) => set("school", e.target.value)}
-                />
-              </div>
-            )}
-
-            {role !== "org_admin" && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-3.5 py-2.5 text-xs text-amber-800">
-                ⏳ <strong>Validation requise :</strong> votre demande de compte sera envoyée à l&apos;administrateur. Votre accès s&apos;ouvrira dès son acceptation.
-              </div>
-            )}
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-3.5 py-2.5 text-xs text-amber-800">
+              ⏳ <strong>Validation requise :</strong> votre demande de compte sera envoyée à l&apos;administrateur. Votre accès s&apos;ouvrira dès son acceptation.
+            </div>
 
             {/* Email */}
             <div>

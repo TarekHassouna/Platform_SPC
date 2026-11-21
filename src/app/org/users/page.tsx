@@ -297,7 +297,6 @@ function OrgUsersContent() {
                 <option value="student">🎓 Élève</option>
                 <option value="teacher">👨‍🏫 Enseignant / Tuteur</option>
                 <option value="parent">👪 Parent</option>
-                <option value="org_admin">🏛️ Administrateur</option>
               </select>
             </div>
             <div>

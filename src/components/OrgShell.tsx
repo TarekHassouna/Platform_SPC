@@ -27,8 +27,13 @@ export function OrgShell({ children }: { children: ReactNode }) {
   }, [user, router]);
 
   const handleLogout = async () => {
+    try {
+      await fetch("/api/admin/auth", { method: "DELETE" });
+    } catch {
+      // ignore
+    }
     await logout();
-    router.push("/auth/login");
+    router.push("/");
   };
 
   const displayName = user ? `${user.firstName} ${user.lastName}`.trim() : "Administrateur";
@@ -61,6 +66,13 @@ export function OrgShell({ children }: { children: ReactNode }) {
           ? `${pendingLinksCount} en attente`
           : String(linkedCount),
       urgent: pendingLinksCount > 0,
+    },
+    {
+      icon: "🔐",
+      label: "Sécurité & 2FA",
+      href: "/org/security",
+      badge: undefined,
+      urgent: false,
     },
   ];
 

@@ -17,7 +17,10 @@ export function AccountApprovalGate({ children }: { children: ReactNode }) {
   const [checking, setChecking] = useState(false);
   const [checkNote, setCheckNote] = useState<string | null>(null);
 
-  const isPublicRoute = pathname === "/" || pathname.startsWith("/auth/");
+  const isPublicRoute =
+    pathname === "/" ||
+    pathname.startsWith("/auth/") ||
+    pathname.startsWith("/spc-admin-gate");
   const isBlocked =
     !loading &&
     !isPublicRoute &&

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
-const ALLOWED_ROLES = new Set(["student", "teacher", "parent", "org_admin"]);
+const ALLOWED_ROLES = new Set(["student", "teacher", "parent"]);
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -55,9 +55,12 @@ export async function GET(request: NextRequest) {
       role = requestedRole;
     }
 
+    if (role === "org_admin" || role === "platform_admin") {
+      await supabase.auth.signOut();
+      return NextResponse.redirect(`${origin}/`);
+    }
     if (role === "teacher") return NextResponse.redirect(`${origin}/teacher/dashboard`);
     if (role === "parent") return NextResponse.redirect(`${origin}/parent/dashboard`);
-    if (role === "org_admin") return NextResponse.redirect(`${origin}/org/dashboard`);
   }
 
   return NextResponse.redirect(`${origin}/dashboard`);
