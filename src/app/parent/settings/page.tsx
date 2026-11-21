@@ -8,6 +8,7 @@ import {
   unlinkParentChild,
   type ParentChildSnapshot,
 } from "@/lib/db";
+import { openPrintableParentReport } from "@/lib/parent-report";
 
 const inputCls =
   "w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-900 bg-white placeholder:text-slate-400 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
@@ -85,34 +86,17 @@ export default function ParentSettingsPage() {
     }
   };
 
-  const handleRealGdprExport = () => {
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      parent: {
-        firstName,
-        lastName,
-        email,
-      },
-      children: childrenList.map((c) => ({
-        name: c.childName,
-        email: c.childEmail,
-        level: c.childLevel,
-        linked: c.linked,
-        classes: c.enrolledClasses.map((cl) => cl.name),
-        submissionsCount: c.recentSubmissions.length,
-        submissions: c.recentSubmissions,
-      })),
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
+  const linkedChildrenCount = childrenList.filter((c) => c.linked).length;
+
+  const handlePrintReport = () => {
+    const res = openPrintableParentReport({
+      parentName: `${firstName} ${lastName}`.trim() || "Parent",
+      parentEmail: email,
+      children: childrenList,
     });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `spc-export-parent-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast("📦 Export JSON réel téléchargé !");
+    if (!res.ok) {
+      showToast(`⚠️ ${res.error || "Impossible de générer le bilan."}`);
+    }
   };
 
   return (
@@ -126,7 +110,7 @@ export default function ParentSettingsPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-extrabold text-slate-900">⚙️ Paramètres &amp; Enfants rattachés</h1>
         <p className="text-slate-500 mt-1 text-sm">
-          Gérez vos coordonnées, rattachez vos enfants par e-mail et téléchargez vos données réelles (RGPD).
+          Gérez vos coordonnées, suivez vos demandes de rattachement et imprimez le bilan pédagogique de votre enfant.
         </p>
       </div>
 
@@ -270,25 +254,35 @@ export default function ParentSettingsPage() {
           </form>
         </div>
 
-        {/* Real GDPR Export */}
+        {/* Printable Parent Progress Report (PDF / Print) */}
         <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-slate-900 text-base">🛡️ Protection des données (RGPD Mineurs)</h2>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <h2 className="font-bold text-slate-900 text-base">
+              📄 Bilan pédagogique &amp; Confidentialité
+            </h2>
             <span className="text-xs font-bold bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full">
-              Consentement parental actif
+              {linkedChildrenCount > 0
+                ? `${linkedChildrenCount} enfant(s) prêt(s)`
+                : "En attente de liaison"}
             </span>
           </div>
           <p className="text-xs text-slate-500 leading-relaxed">
-            Les photos de copies de votre enfant sont stockées dans un espace privé chiffré et supprimées automatiquement après 90 jours. Les discussions avec le Tuteur IA restent strictement privées à l&apos;élève.
+            Générez un bilan clair et lisible regroupant les notes, devoirs et résultats de votre enfant en Physique-Chimie (prêt à imprimer ou enregistrer en PDF). Les discussions privées avec le Tuteur IA restent confidentielles à l&apos;élève.
           </p>
-          <div>
+          <div className="flex items-center gap-3 flex-wrap pt-1">
             <button
               type="button"
-              onClick={handleRealGdprExport}
-              className="text-xs font-bold border border-slate-200 text-slate-700 px-4 py-2.5 rounded-xl hover:bg-slate-50"
+              disabled={linkedChildrenCount === 0}
+              onClick={handlePrintReport}
+              className="text-xs font-bold bg-indigo-600 text-white px-5 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              📥 Télécharger l&apos;export réel des données (JSON)
+              🖨️ Imprimer / Télécharger le bilan PDF
             </button>
+            {linkedChildrenCount === 0 && (
+              <span className="text-[11px] text-amber-700">
+                Disponible dès qu&apos;une liaison élève est validée par l&apos;administrateur.
+              </span>
+            )}
           </div>
         </div>
       </div>

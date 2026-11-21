@@ -8,6 +8,7 @@ import {
   linkParentToChild,
   type ParentChildSnapshot,
 } from "@/lib/db";
+import { openPrintableParentReport } from "@/lib/parent-report";
 
 export default function ParentDashboard() {
   const { user } = useAuth();
@@ -159,7 +160,22 @@ export default function ParentDashboard() {
               : "Rattachez le compte élève de votre enfant pour suivre ses devoirs et ses progrès."}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {activeChild?.linked && (
+            <button
+              type="button"
+              onClick={() =>
+                openPrintableParentReport({
+                  parentName: `${user?.firstName || ""} ${user?.lastName || ""}`.trim() || "Parent",
+                  parentEmail: user?.email || "",
+                  children: [activeChild],
+                })
+              }
+              className="text-xs font-bold border border-indigo-200 bg-indigo-50 text-indigo-700 px-3.5 py-2.5 rounded-xl hover:bg-indigo-100"
+            >
+              🖨️ Bilan PDF
+            </button>
+          )}
           <button
             type="button"
             onClick={() => loadChildren()}
