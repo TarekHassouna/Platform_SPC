@@ -83,7 +83,71 @@ export default function DashboardPage() {
   const initials = user ? (user.firstName?.[0] ?? "E") + (user.lastName?.[0] ?? "") : "EL";
   const level = user?.level || "Terminale";
 
-  const acquiredCount = data.mastery.filter((m) => m.status === "acquired").length;
+  // Build unified REAL mastery items from actual submissions + evaluated concept_mastery
+  const realMasteryItems = (() => {
+    const byEx = new Map<
+      string,
+      { label: string; exerciseId?: string; sumPct: number; count: number }
+    >();
+    data.recentSubmissions.forEach((s) => {
+      const pct = s.maxScore > 0 ? Math.round((s.score / s.maxScore) * 100) : 0;
+      const prev = byEx.get(s.exerciseTitle);
+      if (!prev) {
+        byEx.set(s.exerciseTitle, {
+          label: s.exerciseTitle,
+          exerciseId: s.exerciseId,
+          sumPct: pct,
+          count: 1,
+        });
+      } else {
+        prev.sumPct += pct;
+        prev.count += 1;
+        if (!prev.exerciseId && s.exerciseId) prev.exerciseId = s.exerciseId;
+      }
+    });
+
+    const list: {
+      key: string;
+      label: string;
+      score: number;
+      status: "acquired" | "developing" | "needs_review";
+      href: string;
+    }[] = [];
+
+    byEx.forEach((v) => {
+      const avg = Math.round(v.sumPct / v.count);
+      const isPhoto = v.label.toLowerCase().includes("copie");
+      list.push({
+        key: `ex-${v.label}`,
+        label: v.label,
+        score: avg,
+        status: avg >= 80 ? "acquired" : avg >= 45 ? "developing" : "needs_review",
+        href: isPhoto ? "/photo" : v.exerciseId ? `/exercises/${v.exerciseId}` : "/exercises",
+      });
+    });
+
+    data.mastery
+      .filter((m) => m.attempts > 0)
+      .forEach((m) => {
+        const ex = CURRICULUM_EXERCISES.find((e) => e.conceptCodes.includes(m.conceptCode));
+        list.push({
+          key: `c-${m.conceptCode}`,
+          label: m.conceptLabel,
+          score: m.masteryScore,
+          status:
+            m.status === "acquired"
+              ? "acquired"
+              : m.status === "developing"
+              ? "developing"
+              : "needs_review",
+          href: ex ? `/exercises/${ex.id}` : "/exercises",
+        });
+      });
+
+    return list;
+  })();
+
+  const acquiredCount = realMasteryItems.filter((m) => m.status === "acquired").length;
   const totalSubmissions = data.recentSubmissions.length;
   const avgPrecision = totalSubmissions
     ? Math.round(
@@ -96,21 +160,11 @@ export default function DashboardPage() {
       )
     : 0;
 
-  // Adaptive recommendations derived ONLY from real Supabase concept_mastery data
-  const weakOrDeveloping = [...data.mastery]
+  // Adaptive recommendations derived from ALL real weak/developing exercises & concepts
+  const adaptiveRecommendations = [...realMasteryItems]
     .filter((m) => m.status === "needs_review" || m.status === "developing")
-    .sort((a, b) => a.masteryScore - b.masteryScore)
+    .sort((a, b) => a.score - b.score)
     .slice(0, 3);
-
-  const adaptiveRecommendations = weakOrDeveloping
-    .map((m) => {
-      const ex = CURRICULUM_EXERCISES.find((e) => e.conceptCodes.includes(m.conceptCode));
-      return ex ? { mastery: m, exercise: ex } : null;
-    })
-    .filter(Boolean) as {
-    mastery: (typeof data.mastery)[number];
-    exercise: (typeof CURRICULUM_EXERCISES)[number];
-  }[];
 
   const navItems = [
     { icon: "🏠", label: "Tableau de bord", href: "/dashboard", active: true },
@@ -205,8 +259,8 @@ export default function DashboardPage() {
           {[
             { label: "Exercices soumis", value: String(totalSubmissions), icon: "📝", color: "text-indigo-600" },
             {
-              label: "Compétences acquises",
-              value: data.mastery.length > 0 ? `${acquiredCount} / ${data.mastery.length}` : "0",
+              label: "Notions maîtrisées",
+              value: realMasteryItems.length > 0 ? `${acquiredCount} / ${realMasteryItems.length}` : "0",
               icon: "✅",
               color: "text-emerald-600",
             },
@@ -387,28 +441,25 @@ export default function DashboardPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {adaptiveRecommendations.map(({ mastery: m, exercise: ex }) => (
+                  {adaptiveRecommendations.map((item) => (
                     <div
-                      key={`${m.conceptCode}-${ex.id}`}
+                      key={item.key}
                       className={`border rounded-2xl p-5 flex items-center justify-between gap-4 shadow-xs transition-all ${
-                        m.status === "needs_review"
+                        item.status === "needs_review"
                           ? "bg-rose-50/70 border-rose-200"
                           : "bg-amber-50/70 border-amber-200"
                       }`}
                     >
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs font-bold text-rose-700 mb-1">
-                          {m.status === "needs_review"
-                            ? `⚠️ Lacune détectée : ${m.conceptLabel} (${m.masteryScore}%)`
-                            : `🔁 À consolider : ${m.conceptLabel} (${m.masteryScore}%)`}
+                          {item.status === "needs_review"
+                            ? `⚠️ À retravailler (${item.score}%)`
+                            : `🔁 À consolider (${item.score}%)`}
                         </div>
-                        <div className="font-bold text-slate-900">{ex.title}</div>
-                        <div className="text-xs text-slate-500">
-                          {ex.domain} · {ex.chapter} · {ex.difficulty}
-                        </div>
+                        <div className="font-bold text-slate-900 truncate">{item.label}</div>
                       </div>
                       <Link
-                        href={`/exercises/${ex.id}`}
+                        href={item.href}
                         className="bg-white border border-slate-200 text-indigo-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:border-indigo-300 transition-colors whitespace-nowrap"
                       >
                         Travailler →
@@ -426,27 +477,27 @@ export default function DashboardPage() {
             <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-3 shadow-xs">
               {loadingData ? (
                 <p className="text-xs text-slate-400">Chargement de tes progrès…</p>
-              ) : data.mastery.length === 0 ? (
+              ) : realMasteryItems.length === 0 ? (
                 <div className="text-center py-4 space-y-3">
                   <div className="text-3xl">🗺️</div>
                   <p className="text-xs text-slate-500 leading-relaxed">
                     Fais ton premier exercice pour voir ta carte de maîtrise se remplir en temps réel !
                   </p>
                   <Link
-                    href="/exercises/ohm-001"
+                    href="/exercises"
                     className="inline-block bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-indigo-700"
                   >
                     Lancer mon premier exercice →
                   </Link>
                 </div>
               ) : (
-                data.mastery.map((skill) => {
+                realMasteryItems.slice(0, 6).map((skill) => {
                   const s = statusStyles[skill.status] || statusStyles.developing;
                   return (
-                    <div key={skill.conceptCode} className="flex items-center gap-3">
+                    <div key={skill.key} className="flex items-center gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-slate-800 truncate">
-                          {skill.conceptLabel}
+                          {skill.label}
                         </div>
                         <div className="mt-1.5 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                           <div
@@ -457,12 +508,12 @@ export default function DashboardPage() {
                                 ? "bg-amber-400"
                                 : "bg-rose-400"
                             }`}
-                            style={{ width: `${skill.masteryScore}%` }}
+                            style={{ width: `${skill.score}%` }}
                           />
                         </div>
                       </div>
                       <span className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${s.bg} ${s.text}`}>
-                        {skill.masteryScore}%
+                        {skill.score}%
                       </span>
                     </div>
                   );

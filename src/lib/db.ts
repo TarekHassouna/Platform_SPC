@@ -28,6 +28,7 @@ export interface MasteryRow {
 
 export interface SubmissionHistoryRow {
   id: string;
+  exerciseId?: string;
   exerciseTitle: string;
   score: number;
   maxScore: number;
@@ -391,6 +392,7 @@ export async function fetchStudentDashboardData(studentId: string): Promise<Stud
     const params = (s.rendered_params as Record<string, unknown>) || {};
     return {
       id: String(s.id),
+      exerciseId: params.exerciseId ? String(params.exerciseId) : undefined,
       exerciseTitle: String(params.exerciseTitle || "Exercice Physique-Chimie"),
       score: Number(ev?.score ?? 0),
       maxScore: Number(ev?.max_score ?? 2),
